@@ -1,0 +1,1269 @@
+<!DOCTYPE html>
+<html lang="sk">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Spa-Francorchamps — Lap Time Explorer</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/hammer.js/2.0.8/hammer.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/chartjs-plugin-zoom/2.0.1/chartjs-plugin-zoom.min.js"></script>
+<style>
+  :root{
+    --bg:#f1efe8; --surface:#ffffff; --surface-2:#f8f7f3;
+    --border:rgba(10,10,8,0.12); --border-strong:rgba(10,10,8,0.22);
+    --text:#1c1c1a; --text-muted:#6b6a63; --text-faint:#96948b;
+    --accent:#0b4a3f; --accent-light:#e1ebe6; --accent-text:#0b4a3f;
+    --warn:#c77d22; --warn-light:#f6e9d8;
+    --mono: ui-monospace, "SF Mono", "Cascadia Mono", Consolas, "Liberation Mono", Menlo, monospace;
+    --sans: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --p-zm:#e34948; --p-zs:#eda100; --p-sm:#7a1f3d; --p-st:#8a8a86;
+    --p-km:#e87ba4; --p-ks:#1f7a3d; --p-kt:#4a3aa7;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:var(--sans);line-height:1.5;}
+  .wrap{max-width:1240px;margin:0 auto;padding:24px 20px 60px;}
+
+  header.top{display:flex;justify-content:space-between;align-items:flex-end;flex-wrap:wrap;gap:16px;margin-bottom:20px;border-bottom:2px solid var(--text);padding-bottom:16px;}
+  header.top h1{font-size:22px;font-weight:700;margin:0 0 4px;letter-spacing:-0.01em;}
+  header.top .sub{font-size:13px;color:var(--text-muted);}
+  .actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap;}
+  button{font-family:var(--sans);cursor:pointer;}
+  .btn{background:var(--surface);border:1px solid var(--border-strong);border-radius:6px;padding:8px 14px;font-size:13px;font-weight:600;color:var(--text);transition:background .15s;}
+  .btn:hover{background:var(--surface-2);}
+  .btn-accent{background:var(--accent);border-color:var(--accent);color:#fff;}
+  .btn-accent:hover{background:#093d34;}
+  .btn-ghost{border-color:transparent;color:var(--text-muted);}
+  .btn-ghost:hover{color:var(--text);background:var(--surface-2);}
+
+  .tower{display:grid;grid-template-columns:repeat(5,1fr);gap:1px;background:var(--border-strong);border:1px solid var(--border-strong);border-radius:8px;overflow:hidden;margin-bottom:20px;}
+  .tower .tile{background:var(--surface);padding:12px 14px;}
+  .tower .tile .label{font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-faint);margin-bottom:4px;}
+  .tower .tile .value{font-family:var(--mono);font-size:19px;font-weight:600;color:var(--text);}
+  .tower .tile .value small{font-family:var(--sans);font-size:11px;font-weight:400;color:var(--text-muted);display:block;margin-top:2px;}
+
+  .panel{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px 18px;margin-bottom:18px;}
+  .panel h2{font-size:13px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);margin:0 0 12px;font-weight:600;}
+
+  .filters-row{display:flex;flex-wrap:wrap;gap:14px;align-items:flex-end;}
+  .field{display:flex;flex-direction:column;gap:4px;}
+  .field label{font-size:11px;color:var(--text-muted);font-weight:600;}
+  .field input[type=text], .field input[type=number], .field select{
+    font-family:var(--sans);font-size:13px;padding:7px 9px;border:1px solid var(--border-strong);border-radius:6px;background:var(--surface);color:var(--text);width:140px;
+  }
+  .field.search input{width:220px;}
+  .field .range-pair{display:flex;gap:6px;align-items:center;}
+  .field .range-pair input{width:66px;}
+  .chips{display:flex;gap:6px;flex-wrap:wrap;}
+  .chip{display:flex;align-items:center;gap:6px;font-size:12px;font-weight:600;padding:6px 10px;border-radius:20px;border:1.5px solid var(--border-strong);cursor:pointer;user-select:none;background:var(--surface);color:var(--text-muted);}
+  .chip .dot{width:9px;height:9px;border-radius:50%;}
+  .chip.active{color:#fff;border-color:transparent;}
+  .chip.active[data-p=ZM]{background:var(--p-zm);} .chip.active[data-p=ZS]{background:var(--p-zs);}
+  .chip.active[data-p=SM]{background:var(--p-sm);} .chip.active[data-p=ST]{background:var(--p-st);}
+  .chip.active[data-p=KM]{background:var(--p-km);} .chip.active[data-p=KS]{background:var(--p-ks);}
+  .chip.active[data-p=KT]{background:var(--p-kt);}
+  .chip.chip-generic.active{background:var(--accent);color:#fff;border-color:var(--accent);}
+  .field.year-field{flex-direction:row;align-items:center;gap:10px;flex-wrap:wrap;}
+  .field.year-field > div{display:flex;flex-direction:column;gap:4px;}
+  #exactYearInput{width:100px;}
+
+  .count-badge{font-size:12px;color:var(--text-muted);margin-left:auto;align-self:center;font-family:var(--mono);}
+
+  .main-grid{display:grid;grid-template-columns:1.15fr 1fr;gap:18px;align-items:start;}
+  @media (max-width:900px){ .main-grid{grid-template-columns:1fr;} .tower{grid-template-columns:repeat(2,1fr);} .field input, .field select{width:100%;} .field.search input{width:100%;} }
+
+  table{width:100%;border-collapse:collapse;font-size:13px;}
+  thead th{position:sticky;top:0;background:var(--surface-2);text-align:left;padding:8px 10px;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted);cursor:pointer;border-bottom:1px solid var(--border-strong);white-space:nowrap;}
+  thead th:hover{color:var(--text);}
+  thead th .arrow{opacity:.4;font-size:10px;margin-left:3px;}
+  tbody td{padding:7px 10px;border-bottom:1px solid var(--border);}
+  tbody tr:hover{background:var(--accent-light);}
+  td.mono, th.mono{font-family:var(--mono);}
+  .table-scroll{max-height:520px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;}
+  .pneu-pill{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;vertical-align:middle;}
+  .stock-badge{font-size:10px;padding:1px 6px;border-radius:10px;font-weight:700;}
+  .stock-badge.A{background:var(--accent-light);color:var(--accent-text);}
+  .stock-badge.N{background:var(--warn-light);color:var(--warn);}
+
+  .chart-toggle{display:flex;gap:4px;margin-bottom:10px;}
+  .chart-toggle button{font-size:12px;padding:6px 12px;border-radius:6px;border:1px solid var(--border-strong);background:var(--surface);color:var(--text-muted);}
+  .chart-toggle button.active{background:var(--accent);color:#fff;border-color:var(--accent);}
+  .chart-wrap{position:relative;height:420px;}
+  .legend-row{display:flex;flex-wrap:wrap;gap:10px;font-size:11px;color:var(--text-muted);margin-bottom:8px;}
+  .legend-row span{display:flex;align-items:center;gap:4px;}
+  .legend-row .sw{width:9px;height:9px;border-radius:2px;}
+
+  .cluster-controls{display:flex;gap:10px;align-items:flex-end;margin-bottom:12px;}
+  .cluster-result{font-size:13px;}
+  .cluster-result .headline{font-family:var(--mono);font-weight:700;font-size:15px;margin-bottom:8px;}
+  .cluster-list{display:grid;grid-template-columns:1fr 1fr;gap:4px 18px;font-size:12.5px;}
+  @media (max-width:700px){.cluster-list{grid-template-columns:1fr;}}
+  .cluster-list .row{display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px dotted var(--border);}
+  .cluster-list .row .t{font-family:var(--mono);color:var(--text-muted);}
+
+  .empty{padding:30px;text-align:center;color:var(--text-muted);font-size:13px;}
+
+  .modal-overlay{position:fixed;inset:0;background:rgba(20,20,18,0.45);display:flex;align-items:center;justify-content:center;z-index:100;}
+  .modal{background:var(--surface);border-radius:12px;padding:22px 24px;width:100%;max-width:420px;box-shadow:0 10px 40px rgba(0,0,0,0.25);}
+  .modal h3{margin:0 0 16px;font-size:16px;}
+  .modal .field{margin-bottom:12px;}
+  .modal .field label{display:block;font-size:11px;color:var(--text-muted);font-weight:600;margin-bottom:4px;}
+  .modal .field input, .modal .field select{width:100%;font-family:var(--sans);font-size:14px;padding:8px 10px;border:1px solid var(--border-strong);border-radius:6px;background:var(--surface);color:var(--text);}
+  .modal .radio-row{display:flex;gap:14px;}
+  .modal .radio-row label{display:flex;align-items:center;gap:6px;font-size:13px;font-weight:400;color:var(--text);}
+  .modal .err{color:#c23b3b;font-size:12px;margin-bottom:10px;min-height:16px;}
+  .modal .modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:16px;}
+
+  .race-controls{display:flex;flex-wrap:wrap;gap:14px;align-items:flex-end;margin-bottom:14px;}
+  .race-controls .field select, .race-controls .field input{width:150px;}
+  .race-controls .btn{height:34px;}
+  .sim-btns{display:flex;gap:8px;margin-left:auto;}
+
+  .race-picker-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;flex-wrap:wrap;gap:8px;}
+  .race-picker-header label{font-size:11px;color:var(--text-muted);font-weight:600;}
+  .race-picker-header .btns{display:flex;gap:6px;}
+  .race-picker-header .btns button{font-size:11px;padding:4px 10px;}
+  .race-car-list{max-height:150px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;padding:8px;display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:2px 10px;margin-bottom:16px;}
+  .race-car-row{display:flex;align-items:center;gap:7px;font-size:12.5px;padding:3px 4px;border-radius:4px;}
+  .race-car-row:hover{background:var(--surface-2);}
+  .race-car-row input[type=checkbox]{accent-color:var(--accent);cursor:pointer;}
+  .race-car-row .swatch{width:9px;height:9px;border-radius:50%;flex-shrink:0;}
+  .race-car-row .rt{margin-left:auto;font-family:var(--mono);color:var(--text-muted);font-size:11px;}
+  .race-car-row label{cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:400;color:var(--text);}
+
+  .custom-order-list{max-height:220px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;padding:6px 8px;margin-bottom:16px;}
+  .custom-order-row{display:flex;align-items:center;gap:8px;font-size:12.5px;padding:5px 4px;border-bottom:1px solid var(--border);}
+  .custom-order-row:last-child{border-bottom:none;}
+  .custom-order-row .pos{font-family:var(--mono);font-weight:700;width:22px;color:var(--text-muted);}
+  .custom-order-row .swatch{width:9px;height:9px;border-radius:50%;flex-shrink:0;}
+  .custom-order-row .nm{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .custom-order-row .rt{font-family:var(--mono);color:var(--text-muted);font-size:11px;}
+  .custom-order-row .moves{display:flex;gap:2px;}
+  .custom-order-row .moves button{font-size:11px;padding:2px 7px;border-radius:4px;border:1px solid var(--border-strong);background:var(--surface);color:var(--text-muted);cursor:pointer;}
+  .custom-order-row .moves button:hover{background:var(--surface-2);color:var(--text);}
+  .custom-order-row .moves button:disabled{opacity:0.3;cursor:default;}
+
+  .track-wrap{position:relative;background:var(--surface-2);border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:14px;}
+  .track-wrap svg{display:block;width:100%;height:auto;}
+  .track-label{font-size:11px;fill:var(--text-faint);font-family:var(--sans);}
+  .sim-clock{position:absolute;top:12px;right:14px;background:rgba(28,28,26,0.85);color:#fff;font-family:var(--mono);font-size:13px;padding:8px 14px;border-radius:8px;text-align:right;line-height:1.4;}
+  .sim-clock .lap{font-size:11px;color:#c9c8c2;}
+  .sim-hint{position:absolute;top:12px;left:14px;background:rgba(255,255,255,0.9);border:1px solid var(--border-strong);font-size:12px;padding:6px 12px;border-radius:8px;color:var(--text-muted);}
+  .flag{position:absolute;bottom:12px;left:50%;transform:translateX(-50%);background:var(--accent);color:#fff;font-size:13px;font-weight:700;padding:6px 16px;border-radius:20px;opacity:0;transition:opacity .3s;pointer-events:none;}
+  .flag.show{opacity:1;}
+
+  .timing-table{width:100%;border-collapse:collapse;font-size:12.5px;}
+  .timing-table thead th{text-align:left;padding:6px 8px;font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted);border-bottom:1px solid var(--border-strong);}
+  .timing-table tbody td{padding:5px 8px;border-bottom:1px solid var(--border);}
+  .timing-table tbody tr.leader td{font-weight:700;}
+  .timing-table .pos{font-family:var(--mono);width:26px;}
+  .timing-table .gap{font-family:var(--mono);color:var(--text-muted);}
+  .timing-table .swatch{width:9px;height:9px;border-radius:50%;display:inline-block;margin-right:6px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="top">
+    <div>
+      <h1>Spa-Francorchamps — Lap Time Explorer</h1>
+      <div class="sub" id="lastUpdated">Načítavam dáta…</div>
+    </div>
+    <div class="actions">
+      <button class="btn btn-accent" id="addLapBtn">+ Pridať nový čas</button>
+    </div>
+  </header>
+
+  <div class="tower" id="towerStats"></div>
+
+  <div class="panel">
+    <h2>Filtre</h2>
+    <div class="filters-row">
+      <div class="field search">
+        <label>Hľadať auto</label>
+        <input type="text" id="searchInput" placeholder="napr. Porsche, GT-R…">
+      </div>
+      <div class="field">
+        <label>Pneumatiky</label>
+        <div class="chips" id="pneuChips"></div>
+      </div>
+      <div class="field">
+        <label>Stock / upravené</label>
+        <select id="stockSelect">
+          <option value="all">Všetky</option>
+          <option value="A">Len sériové</option>
+          <option value="N">Len upravené</option>
+        </select>
+      </div>
+      <div class="field year-field">
+        <div>
+          <label>Rok výroby (desaťročia)</label>
+          <div class="chips" id="yearChips"></div>
+        </div>
+        <div>
+          <label>Konkrétny rok</label>
+          <input type="number" id="exactYearInput" placeholder="napr. 1997">
+        </div>
+      </div>
+      <div class="field">
+        <label>Čas kola (s)</label>
+        <div class="range-pair">
+          <input type="number" id="timeMin" placeholder="min">
+          <span>–</span>
+          <input type="number" id="timeMax" placeholder="max">
+        </div>
+      </div>
+      <div class="field">
+        <label>Power Rating</label>
+        <div class="range-pair">
+          <input type="number" id="prMin" placeholder="min">
+          <span>–</span>
+          <input type="number" id="prMax" placeholder="max">
+        </div>
+      </div>
+      <button class="btn btn-ghost" id="resetFiltersBtn">Reset filtrov</button>
+      <span class="count-badge" id="countBadge"></span>
+    </div>
+  </div>
+
+  <div class="main-grid">
+    <div class="panel">
+      <h2>Zoznam áut</h2>
+      <div class="table-scroll">
+        <table id="carsTable">
+          <thead>
+            <tr>
+              <th data-col="auto">Auto <span class="arrow"></span></th>
+              <th data-col="year" class="mono">Rok <span class="arrow"></span></th>
+              <th data-col="sec" class="mono">Čas <span class="arrow"></span></th>
+              <th data-col="pr" class="mono">PR <span class="arrow"></span></th>
+              <th data-col="pneu">Pneu <span class="arrow"></span></th>
+              <th data-col="stock">Stock <span class="arrow"></span></th>
+            </tr>
+          </thead>
+          <tbody id="tableBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Graf</h2>
+      <div class="chart-toggle">
+        <button class="active" data-mode="scatter">PR vs čas</button>
+        <button data-mode="dist">Rozloženie časov</button>
+        <button class="btn-ghost" id="resetZoomBtn" style="margin-left:auto;border:1px solid var(--border-strong);border-radius:6px;padding:6px 12px;background:var(--surface);">Reset zoom</button>
+      </div>
+      <div class="legend-row" id="legendRow"></div>
+      <div class="chart-wrap"><canvas id="mainChart"></canvas></div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>Nájsť najtesnejší zhluk áut</h2>
+    <div class="cluster-controls">
+      <div class="field">
+        <label>Počet áut</label>
+        <input type="number" id="clusterN" value="20" min="2" style="width:80px;">
+      </div>
+      <button class="btn btn-accent" id="clusterBtn">Nájsť</button>
+      <span style="font-size:12px;color:var(--text-muted);">Hľadá sa v aktuálne filtrovanej sade áut</span>
+    </div>
+    <div class="cluster-result" id="clusterResult"></div>
+  </div>
+
+  <div class="panel">
+    <h2>Živá simulácia pretekov</h2>
+
+    <div class="race-controls">
+      <div class="field">
+        <label>Počet kôl</label>
+        <input type="number" id="simLaps" value="10" min="1" max="50">
+      </div>
+      <div class="field">
+        <label>Štartové poradie</label>
+        <select id="simGridOrder">
+          <option value="reverse">Obrátené (najpomalší vpredu)</option>
+          <option value="normal">Podľa času (najrýchlejší vpredu)</option>
+          <option value="random">Náhodné</option>
+          <option value="custom">Vlastné</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Rýchlosť simulácie</label>
+        <select id="simSpeed">
+          <option value="5">5×</option>
+          <option value="10">10×</option>
+          <option value="25" selected>25×</option>
+          <option value="50">50×</option>
+          <option value="100">100×</option>
+        </select>
+      </div>
+      <div class="sim-btns">
+        <button class="btn btn-ghost" id="simResetBtn">Reset</button>
+      </div>
+    </div>
+    <div id="paceModelNote" style="font-size:11.5px;color:var(--text-muted);margin:-6px 0 12px;">Tempo áut vychádza z modelu: 60&nbsp;% čas + 40&nbsp;% PR, upravené podľa pneumatiky, AWD/turbo a veku auta, s miernou náhodnou odchýlkou na každom kole. Autá sa navyše navzájom blokujú — keď je auto tesne za iným (do ~1 s), nemôže ho okamžite predbehnúť, aj keby malo výrazne rýchlejšie tempo; musí sa cez neho postupne "prepracovať". Štartová pozícia sa riadi tvojím reálnym zajazdeným časom. Pri menej než 4 vybraných autách sa použije čistý zajazdený čas.</div>
+
+    <div class="race-picker-header">
+      <label>Vyber autá do pretekov (<span id="simSelCount">0</span> vybraných, z aktuálne filtrovanej sady)</label>
+      <div class="btns">
+        <button class="btn btn-ghost" id="useClusterBtn" disabled>Použiť posledný nájdený zhluk</button>
+        <button class="btn btn-ghost" id="clearSelBtn">Zrušiť výber</button>
+      </div>
+    </div>
+    <div class="race-car-list" id="raceCarList"></div>
+
+    <div id="customOrderPanel" style="display:none;">
+      <div class="race-picker-header">
+        <label>Vlastné štartové poradie (P1 hore = vpredu)</label>
+      </div>
+      <div class="custom-order-list" id="customOrderList"></div>
+    </div>
+
+    <div class="track-wrap">
+      <svg id="trackSvg" viewBox="0 0 900 620" xmlns="http://www.w3.org/2000/svg">
+        <!-- Track outline adapted from julesr0y/f1-circuits-svg (CC BY 4.0), rotated/rescaled to fit -->
+        <path id="trackPath" d="M 162.47358639735052,392.37183626542355 C 128.03685487860642,411.41939800676045 85.07593104487427,435.0529749348925 80.8834423527945,437.45628528440153 L 80.88344235279436,437.45628528440153 C 72.23949520279402,442.41156818638717 69.54833343163435,437.9123324587957 72.72132596301962,431.99822245870223 C 75.89592996851937,426.0857239327232 122.59644980576944,352.4026815228398 129.39848204293412,342.39542727200046 C 136.19890280598435,332.38817302116115 143.60523783607414,325.2928524951635 150.70861573264412,319.19825739424977 C 162.195203220564,309.3424817101703 206.6283789787592,272.3494819384688 215.5462767282189,264.6176291372567 C 219.86825030321904,260.8677288728923 224.030687940887,256.93895498182206 226.02730436871144,250.28840131141726 C 226.38666309623756,249.09268751848282 226.63160716163657,247.8035082269094 226.8813856493789,246.42408638492566 C 227.78864557582375,241.42045925950595 230.937465995492,230.73960882881954 242.7511827286487,223.68296368156905 C 256.20376863621823,215.64654227272268 261.79558381341826,214.7360593980489 278.26807221149863,216.10097797300244 C 287.80155307268467,216.8906002890912 296.98534405103146,215.83669621822986 301.8455499802635,212.46226942253622 C 313.6350946017032,204.27598092104455 338.1681765203469,187.12828486900247 354.290975035588,175.46926965083463 C 373.78820034652273,161.3688711492494 400.9914948728381,148.17895552233807 419.12863603116284,142.7208926966387 C 437.26577718948755,137.26282987093947 652.1832454135914,75.860831687408 664.8784384873614,72.67494736310698 C 677.5736315611315,69.49228598703496 680.5177947682625,66.21454763820941 689.5887825585966,81.54450088913279 C 693.8962528665666,88.82191799006512 699.952172588733,95.13728504466087 711.8061761747514,92.46062654053128 C 720.8755524909709,90.41405441515838 754.4232206059424,76.75842276916603 764.4030797968358,91.09731943969234 C 766.7348828404694,94.44918559778341 817.1015062881315,169.10878132103386 826.0661367869108,182.9739046019069 C 831.5080848714655,191.38902242765295 827.492291378214,202.93201150957918 819.4913223998859,207.53599305461108 C 811.4919648956724,212.13836312552849 800.7482669745217,213.1809868775885 793.873718402206,200.9402295040981 C 788.5091210751458,191.38902242765295 785.485995636406,185.9309596019536 769.7660656497816,159.54951687401643 C 765.9307572573505,153.11167778672126 757.2755297885489,149.58899537249664 746.4931564886509,154.3960226559513 C 736.9709559462661,158.64064547345714 713.0470112428909,166.5626522201763 702.0583692563413,170.46564252541503 C 676.4407652586614,179.56241390158056 624.0275696856262,187.27331753930451 590.5185769494019,193.43559455302585 C 576.9177354233015,195.93660237867851 563.3136709489721,205.26059160498386 561.5007625701969,224.36461723198863 C 561.1011169898092,228.57056467074722 560.1406784175869,242.55815998431973 560.593502643752,254.6119863605319 C 561.0366580252304,266.38058181848345 568.307629229705,288.1564315272743 597.3189977124522,299.1853603666857 C 618.8579607264164,307.37164886817743 661.9310523320015,324.2018845196695 697.9781167985112,337.84784732097495 C 726.029046709036,348.4674617353117 718.3809905617763,373.7788856512429 715.4336044064164,377.64481205184893 C 708.6412410139385,386.55626390485077 692.0833444877914,409.3586226245571 718.1537727116364,427.9066896820708 C 730.6233594093811,436.77463173398206 761.0028694153107,455.19539233645287 777.5527085708856,465.8843001377117 C 796.0234248709048,477.81404300710994 783.4458694074908,491.3552599909751 755.7881391808959,528.4256105201712 C 744.0533846793481,544.1519864032534 720.6483346408312,540.0523962560496 711.8061761747515,537.7495997464765 C 671.0600531904564,527.1364312285976 647.1957330293166,507.50223061793326 629.9658517974367,487.48933359036914 C 612.7359705655568,467.476436562805 592.3330968022917,439.2756395596346 580.5435521808521,405.61839120487946 C 568.7556190335268,371.9595313760098 558.7950975320072,361.78629529138044 541.550713033097,352.4026815228398 C 493.4884975691225,326.24845664504244 472.4055817295523,313.51297671841064 448.826492486673,316.2412023942031 C 425.2506261920226,318.97103954410994 378.3212770305182,346.94461869714047 357.9184032672531,352.8571172231195 C 342.95586611442815,357.19198259103536 304.9460261764979,360.55029464558436 273.1306927345784,361.3157448499561 C 267.5388775573783,361.44949720145684 261.6279905055138,362.4051013513357 263.15566796602843,351.49219864816604 C 265.57287913772876,334.2091387705088 251.67069195222302,338.97910214933074 248.04165224644362,341.48494439732673 C 229.60316542871362,354.2220357980729 220.6627070416514,359.73166579543516 202.39825942828378,370.1401771007767 C 195.62490702445308,374.0012068191801 180.17545173230081,382.5806232776065 162.47358639735052,392.37183626542355 Z" fill="none" stroke="#c9c7bd" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M 162.47358639735052,392.37183626542355 C 128.03685487860642,411.41939800676045 85.07593104487427,435.0529749348925 80.8834423527945,437.45628528440153 L 80.88344235279436,437.45628528440153 C 72.23949520279402,442.41156818638717 69.54833343163435,437.9123324587957 72.72132596301962,431.99822245870223 C 75.89592996851937,426.0857239327232 122.59644980576944,352.4026815228398 129.39848204293412,342.39542727200046 C 136.19890280598435,332.38817302116115 143.60523783607414,325.2928524951635 150.70861573264412,319.19825739424977 C 162.195203220564,309.3424817101703 206.6283789787592,272.3494819384688 215.5462767282189,264.6176291372567 C 219.86825030321904,260.8677288728923 224.030687940887,256.93895498182206 226.02730436871144,250.28840131141726 C 226.38666309623756,249.09268751848282 226.63160716163657,247.8035082269094 226.8813856493789,246.42408638492566 C 227.78864557582375,241.42045925950595 230.937465995492,230.73960882881954 242.7511827286487,223.68296368156905 C 256.20376863621823,215.64654227272268 261.79558381341826,214.7360593980489 278.26807221149863,216.10097797300244 C 287.80155307268467,216.8906002890912 296.98534405103146,215.83669621822986 301.8455499802635,212.46226942253622 C 313.6350946017032,204.27598092104455 338.1681765203469,187.12828486900247 354.290975035588,175.46926965083463 C 373.78820034652273,161.3688711492494 400.9914948728381,148.17895552233807 419.12863603116284,142.7208926966387 C 437.26577718948755,137.26282987093947 652.1832454135914,75.860831687408 664.8784384873614,72.67494736310698 C 677.5736315611315,69.49228598703496 680.5177947682625,66.21454763820941 689.5887825585966,81.54450088913279 C 693.8962528665666,88.82191799006512 699.952172588733,95.13728504466087 711.8061761747514,92.46062654053128 C 720.8755524909709,90.41405441515838 754.4232206059424,76.75842276916603 764.4030797968358,91.09731943969234 C 766.7348828404694,94.44918559778341 817.1015062881315,169.10878132103386 826.0661367869108,182.9739046019069 C 831.5080848714655,191.38902242765295 827.492291378214,202.93201150957918 819.4913223998859,207.53599305461108 C 811.4919648956724,212.13836312552849 800.7482669745217,213.1809868775885 793.873718402206,200.9402295040981 C 788.5091210751458,191.38902242765295 785.485995636406,185.9309596019536 769.7660656497816,159.54951687401643 C 765.9307572573505,153.11167778672126 757.2755297885489,149.58899537249664 746.4931564886509,154.3960226559513 C 736.9709559462661,158.64064547345714 713.0470112428909,166.5626522201763 702.0583692563413,170.46564252541503 C 676.4407652586614,179.56241390158056 624.0275696856262,187.27331753930451 590.5185769494019,193.43559455302585 C 576.9177354233015,195.93660237867851 563.3136709489721,205.26059160498386 561.5007625701969,224.36461723198863 C 561.1011169898092,228.57056467074722 560.1406784175869,242.55815998431973 560.593502643752,254.6119863605319 C 561.0366580252304,266.38058181848345 568.307629229705,288.1564315272743 597.3189977124522,299.1853603666857 C 618.8579607264164,307.37164886817743 661.9310523320015,324.2018845196695 697.9781167985112,337.84784732097495 C 726.029046709036,348.4674617353117 718.3809905617763,373.7788856512429 715.4336044064164,377.64481205184893 C 708.6412410139385,386.55626390485077 692.0833444877914,409.3586226245571 718.1537727116364,427.9066896820708 C 730.6233594093811,436.77463173398206 761.0028694153107,455.19539233645287 777.5527085708856,465.8843001377117 C 796.0234248709048,477.81404300710994 783.4458694074908,491.3552599909751 755.7881391808959,528.4256105201712 C 744.0533846793481,544.1519864032534 720.6483346408312,540.0523962560496 711.8061761747515,537.7495997464765 C 671.0600531904564,527.1364312285976 647.1957330293166,507.50223061793326 629.9658517974367,487.48933359036914 C 612.7359705655568,467.476436562805 592.3330968022917,439.2756395596346 580.5435521808521,405.61839120487946 C 568.7556190335268,371.9595313760098 558.7950975320072,361.78629529138044 541.550713033097,352.4026815228398 C 493.4884975691225,326.24845664504244 472.4055817295523,313.51297671841064 448.826492486673,316.2412023942031 C 425.2506261920226,318.97103954410994 378.3212770305182,346.94461869714047 357.9184032672531,352.8571172231195 C 342.95586611442815,357.19198259103536 304.9460261764979,360.55029464558436 273.1306927345784,361.3157448499561 C 267.5388775573783,361.44949720145684 261.6279905055138,362.4051013513357 263.15566796602843,351.49219864816604 C 265.57287913772876,334.2091387705088 251.67069195222302,338.97910214933074 248.04165224644362,341.48494439732673 C 229.60316542871362,354.2220357980729 220.6627070416514,359.73166579543516 202.39825942828378,370.1401771007767 C 195.62490702445308,374.0012068191801 180.17545173230081,382.5806232776065 162.47358639735052,392.37183626542355 Z" fill="none" stroke="#ffffff" stroke-width="1.6" stroke-dasharray="5 7" opacity="0.6"/>
+        <g id="startFinishMark"><rect x="150.5" y="389.4" width="24" height="6" fill="#1c1c1a" transform="rotate(61.1 162.5 392.4)"/></g>
+        <text class="track-label" x="95" y="412">La Source</text>
+        <text class="track-label" x="262" y="224">Eau Rouge</text>
+        <text class="track-label" x="470" y="140">Kemmel Straight</text>
+        <text class="track-label" x="700" y="92">Les Combes</text>
+        <text class="track-label" x="576" y="247">Pouhon</text>
+        <text class="track-label" x="731" y="381">Fagnes</text>
+        <text class="track-label" x="778" y="520">Stavelot</text>
+        <text class="track-label" x="481" y="309">Blanchimont</text>
+        <text class="track-label" x="195" y="360">Bus Stop</text>
+        <g id="carMarkers"></g>
+      </svg>
+      <div class="sim-hint" id="simHint">Vyber autá nižšie a stlač Štart</div>
+      <div class="sim-clock" id="simClock">00:00.0<div class="lap">Kolo — / —</div></div>
+      <div class="flag" id="finishFlag">🏁 Cieľ!</div>
+    </div>
+
+    <div style="display:flex; justify-content:center; margin-bottom:14px;">
+      <button class="btn btn-accent" id="simPlayBtn" style="font-size:15px; padding:10px 32px;">▶ Štart</button>
+    </div>
+
+    <div class="table-scroll" style="max-height:360px;">
+      <table class="timing-table">
+        <thead>
+          <tr><th class="pos">Poz.</th><th>Auto</th><th>Pneu</th><th>Kolo</th><th class="gap">+/-</th><th class="gap">Interval</th><th class="gap">Odstup</th></tr>
+        </thead>
+        <tbody id="timingBody"><tr><td colspan="5" class="empty">Zatiaľ žiadna simulácia</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="addLapOverlay" style="display:none;">
+    <div class="modal">
+      <h3>Pridať nový čas</h3>
+      <div class="err" id="addLapErr"></div>
+      <div class="field">
+        <label>Auto</label>
+        <input type="text" id="lapAuto" placeholder="napr. Porsche 911 GT3 (997) '09">
+      </div>
+      <div class="field">
+        <label>Power Rating (PR)</label>
+        <input type="number" id="lapPr" step="0.01" placeholder="napr. 576.76">
+      </div>
+      <div class="field">
+        <label>Pneumatiky</label>
+        <select id="lapPneu"></select>
+      </div>
+      <div class="field">
+        <label>Čas kola (mm:ss.mmm alebo sekundy)</label>
+        <input type="text" id="lapTime" placeholder="napr. 2:40.914 alebo 160.914">
+      </div>
+      <div class="field">
+        <label>Stock / upravené</label>
+        <div class="radio-row">
+          <label><input type="radio" name="lapStock" value="A" checked> Sériové</label>
+          <label><input type="radio" name="lapStock" value="N"> Upravené</label>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-ghost" id="addLapCancelBtn">Zrušiť</button>
+        <button class="btn btn-accent" id="addLapSaveBtn">Uložiť</button>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+// Supabase projekt: nastav URL a anon (public) key vygenerované na supabase.com/dashboard → Project Settings → API.
+// Anon key je bezpečné mať v klientskom kóde — prístup k dátam obmedzujú RLS politiky na strane databázy (viď supabase_setup.sql).
+const SUPABASE_URL = 'https://kgltibejkeaaucxccdki.supabase.co';
+const SUPABASE_ANON_KEY = 'sb_publishable_6VpHXoHzA9ZInIWwoUVkEQ_DTLa1h0M';
+const supabaseClient = (SUPABASE_URL.includes('YOUR-PROJECT')) ? null : window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+const PNEU_COLORS = { ZM:'#e34948', ZS:'#eda100', SM:'#7a1f3d', ST:'#8a8a86', KM:'#e87ba4', KS:'#1f7a3d', KT:'#4a3aa7' };
+const PNEU_ORDER = ['ZM','ZS','SM','ST','KM','KS','KT'];
+
+let cars = [];
+let filters = { search:'', pneu:new Set(PNEU_ORDER), stock:'all', timeMin:null, timeMax:null, prMin:null, prMax:null, yearDecades:new Set(), exactYear:null };
+let allYearDecades = new Set();
+let sortState = { col:'sec', dir:'asc' };
+let chartMode = 'scatter';
+let chart = null;
+
+function fmtTime(sec){
+  if(sec==null || isNaN(sec)) return '—';
+  const m = Math.floor(sec/60);
+  const s = (sec - m*60);
+  return m + ':' + (s<10 ? '0':'') + s.toFixed(3);
+}
+
+function parseYearFromName(name){
+  const matches = [...name.matchAll(/'(\d{2})(?!\d)/g)];
+  if(matches.length === 0) return null;
+  const twoDigit = parseInt(matches[matches.length-1][1], 10);
+  return twoDigit <= 30 ? 2000 + twoDigit : 1900 + twoDigit;
+}
+
+function normalizeCars(arr){
+  return arr.map(c => ({...c, sec:Number(c.sec), pr:Number(c.pr), year: parseYearFromName(c.auto), __id: c.id}));
+}
+
+async function loadData(){
+  if(!supabaseClient){
+    document.getElementById('lastUpdated').textContent = 'Chýba konfigurácia Supabase (vyplň SUPABASE_URL a SUPABASE_ANON_KEY na začiatku <script> sekcie).';
+    cars = [];
+    return;
+  }
+  const { data, error } = await supabaseClient.from('laps').select('*').order('sec', { ascending: true });
+  if(error){
+    document.getElementById('lastUpdated').textContent = 'Chyba pri načítaní dát: ' + error.message;
+    cars = [];
+    return;
+  }
+  cars = normalizeCars(data);
+  document.getElementById('lastUpdated').textContent = cars.length + ' zajazdených časov · naposledy načítané ' + new Date().toLocaleString('sk-SK');
+}
+
+function parseTimeCell(v){
+  if(v==null || v==='') return null;
+  if(typeof v === 'string'){
+    const m = v.match(/(\d+):(\d+(?:\.\d+)?)/);
+    if(m) return parseInt(m[1],10)*60 + parseFloat(m[2]);
+    const f = parseFloat(v);
+    return isNaN(f) ? null : f;
+  }
+  if(typeof v === 'number') return v;
+  return null;
+}
+
+async function insertLap(lap){
+  const { data, error } = await supabaseClient.from('laps').insert(lap).select();
+  if(error) throw new Error(error.message);
+  return data[0];
+}
+
+function applyFilters(){
+  return cars.filter(c => {
+    if(filters.search && !c.auto.toLowerCase().includes(filters.search.toLowerCase())) return false;
+    if(!filters.pneu.has(c.pneu)) return false;
+    if(filters.stock !== 'all' && c.stock !== filters.stock) return false;
+    if(filters.timeMin!=null && c.sec < filters.timeMin) return false;
+    if(filters.timeMax!=null && c.sec > filters.timeMax) return false;
+    if(filters.prMin!=null && c.pr < filters.prMin) return false;
+    if(filters.prMax!=null && c.pr > filters.prMax) return false;
+    if(filters.exactYear != null){
+      if(c.year !== filters.exactYear) return false;
+    } else if(filters.yearDecades.size > 0){
+      if(c.year == null) return false;
+      const dec = Math.floor(c.year/10)*10;
+      if(!filters.yearDecades.has(dec)) return false;
+    }
+    return true;
+  });
+}
+
+function renderTower(filtered){
+  const el = document.getElementById('towerStats');
+  if(filtered.length===0){ el.innerHTML = '<div class="tile"><div class="label">Aut</div><div class="value">0</div></div>'; return; }
+  const secs = filtered.map(c=>c.sec);
+  const prs = filtered.map(c=>c.pr);
+  const fastest = filtered.reduce((a,b)=>a.sec<b.sec?a:b);
+  const avgSec = secs.reduce((a,b)=>a+b,0)/secs.length;
+  const avgPr = prs.reduce((a,b)=>a+b,0)/prs.length;
+  const spread = Math.max(...secs) - Math.min(...secs);
+  el.innerHTML = `
+    <div class="tile"><div class="label">Aut zobrazených</div><div class="value">${filtered.length}<small>z ${cars.length} celkovo</small></div></div>
+    <div class="tile"><div class="label">Najrýchlejšie kolo</div><div class="value">${fmtTime(fastest.sec)}<small>${fastest.auto}</small></div></div>
+    <div class="tile"><div class="label">Priemerný čas</div><div class="value">${fmtTime(avgSec)}</div></div>
+    <div class="tile"><div class="label">Rozptyl</div><div class="value">${spread.toFixed(1)}s<small>min–max</small></div></div>
+    <div class="tile"><div class="label">Priemerné PR</div><div class="value">${avgPr.toFixed(0)}</div></div>
+  `;
+}
+
+function sortRows(rows){
+  const { col, dir } = sortState;
+  const mul = dir==='asc'?1:-1;
+  return [...rows].sort((a,b)=>{
+    let av=a[col], bv=b[col];
+    if(typeof av==='string'){ av=av.toLowerCase(); bv=bv.toLowerCase(); }
+    if(av<bv) return -1*mul;
+    if(av>bv) return 1*mul;
+    return 0;
+  });
+}
+
+function renderTable(filtered){
+  const tbody = document.getElementById('tableBody');
+  const sorted = sortRows(filtered);
+  if(sorted.length===0){ tbody.innerHTML = '<tr><td colspan="6" class="empty">Žiadne auto nevyhovuje filtrom</td></tr>'; return; }
+  tbody.innerHTML = sorted.map(c => `
+    <tr>
+      <td>${c.auto}</td>
+      <td class="mono">${c.year ?? '—'}</td>
+      <td class="mono">${fmtTime(c.sec)}</td>
+      <td class="mono">${c.pr.toFixed(1)}</td>
+      <td><span class="pneu-pill" style="background:${PNEU_COLORS[c.pneu]||'#999'}"></span>${c.pneu}</td>
+      <td><span class="stock-badge ${c.stock}">${c.stock==='N'?'upravené':'sériové'}</span></td>
+    </tr>
+  `).join('');
+  document.querySelectorAll('#carsTable thead th').forEach(th=>{
+    th.querySelector('.arrow').textContent = th.dataset.col===sortState.col ? (sortState.dir==='asc'?'▲':'▼') : '';
+  });
+}
+
+function renderLegend(){
+  const el = document.getElementById('legendRow');
+  el.innerHTML = PNEU_ORDER.map(p=>`<span><span class="sw" style="background:${PNEU_COLORS[p]}"></span>${p}</span>`).join('') +
+    '<span style="margin-left:8px;">● sériové &nbsp; ▲ upravené</span>';
+}
+
+function renderChart(filtered){
+  const ctx = document.getElementById('mainChart');
+  if(chart) chart.destroy();
+  if(filtered.length===0) return;
+
+  let datasetPoints, xLabel, yLabel;
+  if(chartMode==='scatter'){
+    datasetPoints = filtered.map(c=>({x:c.sec, y:c.pr, auto:c.auto, pneu:c.pneu, stock:c.stock}));
+    xLabel='Čas kola (s)'; yLabel='Power Rating (PR)';
+  } else {
+    const binW = 4;
+    const minT = Math.min(...filtered.map(c=>c.sec));
+    const binStart = Math.floor(minT/binW)*binW;
+    const sorted = [...filtered].sort((a,b)=>a.sec-b.sec);
+    const stackCount = {};
+    datasetPoints = sorted.map(c=>{
+      const b = Math.floor((c.sec-binStart)/binW);
+      stackCount[b] = (stackCount[b]||0)+1;
+      return {x: binStart+b*binW+binW/2, y: stackCount[b], auto:c.auto, pneu:c.pneu, stock:c.stock, sec:c.sec, pr:c.pr};
+    });
+    xLabel='Čas kola (s)'; yLabel='';
+  }
+
+  const bg = datasetPoints.map(p=>PNEU_COLORS[p.pneu]||'#999');
+  const shapes = datasetPoints.map(p=>p.stock==='N'?'triangle':'circle');
+  const radii = datasetPoints.map(p=>p.stock==='N'?6:5);
+
+  chart = new Chart(ctx, {
+    type:'scatter',
+    data:{ datasets:[{ data:datasetPoints, backgroundColor:bg, pointStyle:shapes, pointRadius:radii, pointHoverRadius:radii.map(r=>r+2) }] },
+    options:{
+      responsive:true, maintainAspectRatio:false,
+      plugins:{
+        legend:{display:false},
+        tooltip:{ callbacks:{ label:(c)=>{
+          const d=c.raw;
+          const sec = chartMode==='scatter' ? d.x : d.sec;
+          const prVal = chartMode==='scatter' ? d.y : d.pr;
+          return d.auto + ' — ' + fmtTime(sec) + (prVal!=null?', PR '+prVal.toFixed(0):'') + ' (' + d.pneu + (d.stock==='N'?', upravené':'') + ')';
+        }}},
+        zoom:{ zoom:{ wheel:{enabled:true}, pinch:{enabled:true}, mode:'xy' }, pan:{enabled:true, mode:'xy'} }
+      },
+      scales:{
+        x:{ title:{display:true, text:xLabel}, grid:{color:'#e1e0d9'} },
+        y:{ title:{display:true, text:yLabel}, grid:{color:'#e1e0d9'}, display: chartMode==='scatter' }
+      }
+    }
+  });
+}
+
+let lastClusterIds = null;
+
+function renderClusterResult(n, filtered){
+  const el = document.getElementById('clusterResult');
+  if(filtered.length < n){ el.innerHTML = `<div class="empty">Vo filtrovanej sade je len ${filtered.length} áut, potrebných je ${n}.</div>`; return; }
+  const sorted = [...filtered].sort((a,b)=>a.sec-b.sec);
+  let bestRange=null, bestStart=0;
+  for(let i=0;i<=sorted.length-n;i++){
+    const range = sorted[i+n-1].sec - sorted[i].sec;
+    if(bestRange===null || range < bestRange){ bestRange=range; bestStart=i; }
+  }
+  const cluster = sorted.slice(bestStart, bestStart+n);
+  lastClusterIds = cluster.map(c=>c.__id);
+  const useBtn = document.getElementById('useClusterBtn');
+  if(useBtn) useBtn.disabled = false;
+  el.innerHTML = `<div class="headline">Rozsah: ${bestRange.toFixed(2)} s &nbsp; (${fmtTime(cluster[0].sec)} – ${fmtTime(cluster[n-1].sec)})</div>` +
+    '<div class="cluster-list">' + cluster.map((c,i)=>`<div class="row"><span>${i+1}. ${c.auto}</span><span class="t">${fmtTime(c.sec)}</span></div>`).join('') + '</div>';
+}
+
+// ---------- Live race simulation ----------
+const SLOT_GAP_SECONDS = 0.2;
+
+const simState = {
+  laps: 10,
+  gridOrder: 'reverse',
+  speed: 25,
+  selectedIds: new Set(),
+  customOrder: [],
+  running: false,
+  finished: false,
+  elapsed: 0,
+  lastTs: null,
+  grid: [],
+  trackLen: 0,
+  animHandle: null,
+  paceModelActive: false
+};
+
+function carColor(i, total){
+  const hue = Math.round((i * 360 / Math.max(total,1)) % 360);
+  return `hsl(${hue}, 68%, 46%)`;
+}
+
+function syncCustomOrder(){
+  // keep existing relative order for still-selected cars, append newly selected ones, drop removed ones
+  simState.customOrder = simState.customOrder.filter(id => simState.selectedIds.has(id));
+  simState.selectedIds.forEach(id => {
+    if(!simState.customOrder.includes(id)) simState.customOrder.push(id);
+  });
+}
+
+function renderCustomOrderList(){
+  const panel = document.getElementById('customOrderPanel');
+  const el = document.getElementById('customOrderList');
+  if(simState.gridOrder !== 'custom'){ panel.style.display = 'none'; return; }
+  panel.style.display = 'block';
+  if(simState.customOrder.length === 0){
+    el.innerHTML = '<div class="empty">Najprv vyber autá vyššie</div>';
+    return;
+  }
+  const byId = new Map(cars.map(c=>[c.__id, c]));
+  el.innerHTML = simState.customOrder.map((id, idx) => {
+    const c = byId.get(id);
+    if(!c) return '';
+    return `<div class="custom-order-row">
+      <span class="pos">P${idx+1}</span>
+      <span class="nm">${c.auto}</span>
+      <span class="rt">${fmtTime(c.sec)}</span>
+      <div class="moves">
+        <button data-dir="up" data-id="${id}" ${idx===0?'disabled':''}>↑</button>
+        <button data-dir="down" data-id="${id}" ${idx===simState.customOrder.length-1?'disabled':''}>↓</button>
+      </div>
+    </div>`;
+  }).join('');
+  el.querySelectorAll('button[data-dir]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const id = parseInt(btn.dataset.id,10);
+      const idx = simState.customOrder.indexOf(id);
+      const dir = btn.dataset.dir === 'up' ? -1 : 1;
+      const swapIdx = idx+dir;
+      if(swapIdx < 0 || swapIdx >= simState.customOrder.length) return;
+      [simState.customOrder[idx], simState.customOrder[swapIdx]] = [simState.customOrder[swapIdx], simState.customOrder[idx]];
+      renderCustomOrderList();
+      if(!simState.running) resetSim(false);
+    });
+  });
+}
+
+function renderRaceCarPicker(filtered){
+  const el = document.getElementById('raceCarList');
+  const sorted = [...filtered].sort((a,b)=>a.sec-b.sec);
+  if(sorted.length === 0){
+    el.innerHTML = '<div class="empty">Žiadne auto nevyhovuje aktuálnym filtrom</div>';
+  } else {
+    el.innerHTML = sorted.map(c => `
+      <div class="race-car-row">
+        <input type="checkbox" id="rc_${c.__id}" data-id="${c.__id}" autocomplete="off" ${simState.selectedIds.has(c.__id)?'checked':''}>
+        <label for="rc_${c.__id}">${c.auto}</label>
+        <span class="rt">${fmtTime(c.sec)}</span>
+      </div>
+    `).join('');
+    el.querySelectorAll('input[type=checkbox]').forEach(cb=>{
+      cb.checked = simState.selectedIds.has(parseInt(cb.dataset.id, 10));
+      cb.addEventListener('change', ()=>{
+        const id = parseInt(cb.dataset.id, 10);
+        if(cb.checked) simState.selectedIds.add(id); else simState.selectedIds.delete(id);
+        document.getElementById('simSelCount').textContent = simState.selectedIds.size;
+        syncCustomOrder();
+        renderCustomOrderList();
+        if(!simState.running) resetSim(false);
+      });
+    });
+  }
+  document.getElementById('simSelCount').textContent = simState.selectedIds.size;
+}
+
+function detectCarTraits(auto){
+  const awd = /\b(GT-R|WRX|STI|Quattro|Evolution|GT-FOUR|Impreza)\b/i.test(auto) || /GR Yaris/i.test(auto);
+  const turbo = /turbo/i.test(auto);
+  return { awd, turbo };
+}
+
+function computeRacePace(selectedCars){
+  const n = selectedCars.length;
+  const paceMap = new Map();
+  if(n < 4){
+    selectedCars.forEach(c => paceMap.set(c.__id, c.sec));
+    return paceMap;
+  }
+  const times = selectedCars.map(c=>c.sec);
+  const prs = selectedCars.map(c=>c.pr);
+  const tMean = times.reduce((a,b)=>a+b,0)/n;
+  const tStd = Math.sqrt(times.reduce((a,b)=>a+(b-tMean)**2,0)/n);
+  const prMean = prs.reduce((a,b)=>a+b,0)/n;
+  const prStd = Math.sqrt(prs.reduce((a,b)=>a+(b-prMean)**2,0)/n);
+  const TIRE_ADJ = { ZM:0.05, ZS:0.05, SM:0, ST:0, KM:-0.05, KS:-0.08, KT:-0.12 };
+  selectedCars.forEach(c => {
+    if(tStd < 0.01 || prStd < 0.01){ paceMap.set(c.__id, c.sec); return; }
+    const tZ = -(c.sec - tMean)/tStd;
+    const prZ = (c.pr - prMean)/prStd;
+    let composite = 0.6*tZ + 0.4*prZ;
+    composite += TIRE_ADJ[c.pneu] ?? 0;
+    const traits = detectCarTraits(c.auto);
+    if(traits.awd) composite += 0.10;
+    if(traits.turbo) composite += 0.05;
+    if(c.year != null){
+      if(c.year < 1980) composite -= 0.12;
+      else if(c.year < 2000) composite -= 0.05;
+      else if(c.year >= 2015) composite += 0.05;
+    }
+    if(/kart/i.test(c.auto)) composite -= 2.5;
+    let implied = tMean - composite*tStd;
+    implied = Math.max(c.sec*0.6, Math.min(c.sec*1.6, implied));
+    paceMap.set(c.__id, implied);
+  });
+  return paceMap;
+}
+
+function gaussianJitter(){
+  return ((Math.random()+Math.random()+Math.random())-1.5)/1.5; // ~bell-shaped, roughly -1..1
+}
+
+function buildLapTimes(pace, laps){
+  const lapTimes = [];
+  const cumulative = [];
+  let cum = 0;
+  for(let i=0;i<laps;i++){
+    const lt = pace * (1 + gaussianJitter()*0.012);
+    lapTimes.push(lt);
+    cum += lt;
+    cumulative.push(cum);
+  }
+  return { lapTimes, cumulative };
+}
+
+function buildGrid(){
+  let selected = cars.filter(c => simState.selectedIds.has(c.__id));
+  if(simState.gridOrder === 'reverse') selected.sort((a,b)=>b.sec-a.sec);
+  else if(simState.gridOrder === 'normal') selected.sort((a,b)=>a.sec-b.sec);
+  else if(simState.gridOrder === 'custom'){
+    const orderMap = new Map(simState.customOrder.map((id,idx)=>[id,idx]));
+    selected.sort((a,b) => (orderMap.get(a.__id) ?? 999999) - (orderMap.get(b.__id) ?? 999999));
+  }
+  else { // random shuffle
+    for(let i=selected.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [selected[i],selected[j]]=[selected[j],selected[i]]; }
+  }
+  const total = selected.length;
+  const paceMap = computeRacePace(selected);
+  simState.paceModelActive = total >= 4;
+  simState.grid = selected.map((car, idx) => {
+    const pace = paceMap.get(car.__id);
+    const { lapTimes, cumulative } = buildLapTimes(pace, simState.laps);
+    return {
+      car, pace, lapTimes, lapCumulative: cumulative,
+      gridPos: idx+1, offsetSec: idx*SLOT_GAP_SECONDS, color: carColor(idx, total), markerEl: null,
+      actualProgress: 0, lastFreeProgress: 0, desiredDelta: 0, constrainedDelta: 0, finishElapsed: null
+    };
+  });
+  const note = document.getElementById('paceModelNote');
+  if(note) note.style.display = simState.paceModelActive ? 'block' : 'none';
+}
+
+function advanceRace(dtSim){
+  simState.elapsed += dtSim;
+  const grid = simState.grid;
+  const FOLLOW_GAP = 0.006;          // laps — closer than this = "stuck in traffic", can't just pass
+  const MAX_OVERTAKE_RATE = 0.00004; // laps/sec — how fast a blocked train can close on clean air ahead
+
+  // 1. each car's own natural (unimpeded) pace-based progress this frame
+  grid.forEach(entry => {
+    if(entry.finishElapsed !== null){ entry.desiredDelta = 0; return; }
+    const newFree = computeProgress(entry, simState.elapsed);
+    entry.desiredDelta = Math.max(0, newFree - entry.lastFreeProgress);
+    entry.lastFreeProgress = newFree;
+  });
+
+  // 2. current track order (who is ahead of whom right now)
+  const order = [...grid].sort((a,b)=>b.actualProgress-a.actualProgress);
+
+  // 3. constrain following cars stuck in traffic — capped relative to the free-running car
+  //    at the FRONT of their train, not the immediately-ahead car, so a long queue doesn't
+  //    let cars deep in the pack accumulate extra allowance link by link.
+  order.forEach((car, i) => {
+    if(car.finishElapsed !== null){ car.constrainedDelta = 0; car.trainLeadDelta = 0; return; }
+    if(i === 0){
+      car.constrainedDelta = car.desiredDelta;
+      car.trainLeadDelta = car.constrainedDelta;
+      return;
+    }
+    const ahead = order[i-1];
+    const gap = ahead.actualProgress - car.actualProgress;
+    if(gap > FOLLOW_GAP || ahead.finishElapsed !== null){
+      car.constrainedDelta = car.desiredDelta; // clean air — this car becomes a new train leader
+      car.trainLeadDelta = car.constrainedDelta;
+    } else {
+      const cap = ahead.trainLeadDelta + MAX_OVERTAKE_RATE*dtSim;
+      car.constrainedDelta = Math.min(car.desiredDelta, cap);
+      car.trainLeadDelta = ahead.trainLeadDelta; // same ceiling propagates through the whole train
+    }
+  });
+
+  // 4. apply movement + capture finish moments
+  order.forEach(car => {
+    if(car.finishElapsed !== null) return;
+    car.actualProgress += car.constrainedDelta;
+    if(car.actualProgress >= simState.laps){
+      car.actualProgress = simState.laps;
+      car.finishElapsed = simState.elapsed;
+    }
+  });
+}
+
+function ensureTrackLen(){
+  if(simState.trackLen === 0){
+    const path = document.getElementById('trackPath');
+    if(path) simState.trackLen = path.getTotalLength();
+  }
+}
+
+// Relative speed at named points around the lap (1.0 = average pace).
+// Values reflect real Spa characteristics: La Source/Bus Stop are slow hairpin/chicane braking
+// zones, Kemmel Straight and Blanchimont are the fastest points, Eau Rouge sits in between.
+const SPEED_PROFILE = [
+  {frac:0.000, speed:0.90}, // mid pit straight
+  {frac:0.048, speed:0.22}, // La Source (tightest hairpin)
+  {frac:0.100, speed:0.55}, // accelerating out of La Source
+  {frac:0.151, speed:0.75}, // Eau Rouge/Raidillon
+  {frac:0.241, speed:1.35}, // Kemmel Straight (fastest point)
+  {frac:0.300, speed:0.60}, // braking for Les Combes
+  {frac:0.336, speed:0.42}, // Les Combes chicane
+  {frac:0.400, speed:0.85}, // Rivage transition
+  {frac:0.546, speed:1.05}, // Pouhon (fast sweeper)
+  {frac:0.600, speed:0.55}, // approaching Fagnes
+  {frac:0.636, speed:0.38}, // Fagnes/Campus chicane
+  {frac:0.670, speed:0.55}, // accelerating out
+  {frac:0.706, speed:0.65}, // Stavelot
+  {frac:0.780, speed:1.10}, // onto Blanchimont
+  {frac:0.866, speed:1.30}, // Blanchimont (very fast)
+  {frac:0.920, speed:0.55}, // braking for Bus Stop
+  {frac:0.956, speed:0.28}, // Bus Stop chicane
+];
+
+function speedAt(d){
+  d = ((d % 1) + 1) % 1;
+  const n = SPEED_PROFILE.length;
+  let i = 0;
+  while(i < n && SPEED_PROFILE[i].frac <= d) i++;
+  const p1 = SPEED_PROFILE[(i-1+n) % n];
+  const p2 = SPEED_PROFILE[i % n];
+  let f1 = p1.frac, f2 = p2.frac;
+  if(f2 <= f1) f2 += 1;
+  let dd = d;
+  if(dd < f1) dd += 1;
+  const span = f2 - f1;
+  const local = span > 0 ? (dd - f1)/span : 0;
+  const smooth = local*local*(3 - 2*local); // smoothstep easing between control points
+  return p1.speed + (p2.speed - p1.speed)*smooth;
+}
+
+const DIST_TIME_N = 1000;
+let DIST_TIME_LUT = null;
+function buildDistTimeLUT(){
+  const dStep = 1/DIST_TIME_N;
+  const cum = [0];
+  let total = 0;
+  for(let i=0;i<DIST_TIME_N;i++){
+    const s = speedAt(i*dStep + dStep/2);
+    total += dStep/Math.max(s, 0.05);
+    cum.push(total);
+  }
+  DIST_TIME_LUT = cum.map(v => v/total);
+}
+
+// Converts "fraction of lap TIME elapsed" into "fraction of lap DISTANCE covered", so the
+// marker visually slows in corners and speeds up on straights while total lap time is unchanged.
+function distanceForTimeFraction(t){
+  if(!DIST_TIME_LUT) buildDistTimeLUT();
+  t = ((t % 1) + 1) % 1;
+  let lo = 0, hi = DIST_TIME_N;
+  while(lo < hi){
+    const mid = (lo+hi) >> 1;
+    if(DIST_TIME_LUT[mid] < t) lo = mid+1; else hi = mid;
+  }
+  if(lo === 0) return 0;
+  const t0 = DIST_TIME_LUT[lo-1], t1 = DIST_TIME_LUT[lo];
+  const d0 = (lo-1)/DIST_TIME_N, d1 = lo/DIST_TIME_N;
+  const localT = t1 > t0 ? (t-t0)/(t1-t0) : 0;
+  return d0 + (d1-d0)*localT;
+}
+
+function buildMarkers(){
+  const g = document.getElementById('carMarkers');
+  g.innerHTML = '';
+  simState.grid.forEach(entry => {
+    const wrap = document.createElementNS('http://www.w3.org/2000/svg','g');
+    const tri = document.createElementNS('http://www.w3.org/2000/svg','path');
+    tri.setAttribute('d','M -7,-5 L 9,0 L -7,5 Z');
+    tri.setAttribute('fill', entry.color);
+    tri.setAttribute('stroke','#fff');
+    tri.setAttribute('stroke-width','1.2');
+    const title = document.createElementNS('http://www.w3.org/2000/svg','title');
+    title.textContent = entry.car.auto + ' — reálny čas ' + fmtTime(entry.car.sec) + ', priemerné tempo v simulácii ' + fmtTime(entry.pace);
+    wrap.appendChild(tri);
+    wrap.appendChild(title);
+    g.appendChild(wrap);
+    entry.markerEl = wrap;
+  });
+}
+
+function computeProgress(entry, elapsed){
+  const eff = Math.max(0, elapsed - entry.offsetSec);
+  const cum = entry.lapCumulative;
+  const n = cum.length;
+  if(n === 0) return 0;
+  if(eff >= cum[n-1]){
+    return n + (eff - cum[n-1]) / entry.lapTimes[n-1];
+  }
+  let lap = 0;
+  while(lap < n && eff >= cum[lap]) lap++;
+  const prevCum = lap === 0 ? 0 : cum[lap-1];
+  const fracInLap = (eff - prevCum) / entry.lapTimes[lap];
+  return lap + fracInLap;
+}
+
+function positionMarker(entry){
+  ensureTrackLen();
+  const path = document.getElementById('trackPath');
+  const timeFrac = ((entry.actualProgress % 1) + 1) % 1;
+  const frac = distanceForTimeFraction(timeFrac);
+  const len = simState.trackLen;
+  const pt = path.getPointAtLength(frac*len);
+  const pt2 = path.getPointAtLength(((frac+0.004)%1)*len);
+  const angle = Math.atan2(pt2.y-pt.y, pt2.x-pt.x) * 180/Math.PI;
+  if(entry.markerEl){
+    entry.markerEl.setAttribute('transform', `translate(${pt.x.toFixed(1)},${pt.y.toFixed(1)}) rotate(${angle.toFixed(1)})`);
+  }
+}
+
+function updateLiveTiming(){
+  const body = document.getElementById('timingBody');
+  if(simState.grid.length === 0){
+    body.innerHTML = '<tr><td colspan="7" class="empty">Vyber autá a stlač Štart</td></tr>';
+    return;
+  }
+  const rows = simState.grid.map(entry => {
+    const progress = entry.actualProgress;
+    const finished = entry.finishElapsed !== null;
+    return { entry, progress, finished, finishElapsed: entry.finishElapsed };
+  });
+  rows.sort((a,b) => {
+    if(a.finished !== b.finished) return a.finished ? -1 : 1;
+    if(a.finished && b.finished) return a.finishElapsed - b.finishElapsed;
+    return b.progress - a.progress;
+  });
+
+  const leader = rows[0];
+  body.innerHTML = rows.map((r,i) => {
+    const lap = Math.min(Math.floor(r.progress)+1, simState.laps);
+    let gapLeaderStr, gapAheadStr;
+    if(i===0){
+      gapLeaderStr = '—'; gapAheadStr = '—';
+    } else {
+      if(r.finished && leader.finished){
+        gapLeaderStr = '+' + (r.finishElapsed - leader.finishElapsed).toFixed(1) + 's';
+      } else {
+        const gapLeaderLaps = leader.progress - r.progress;
+        gapLeaderStr = gapLeaderLaps >= 1 ? '+' + Math.floor(gapLeaderLaps) + ' kôl' : '+' + (gapLeaderLaps*r.entry.pace).toFixed(1) + 's';
+      }
+      const ahead = rows[i-1];
+      if(r.finished && ahead.finished){
+        gapAheadStr = '+' + (r.finishElapsed - ahead.finishElapsed).toFixed(1) + 's';
+      } else {
+        const gapAheadLaps = ahead.progress - r.progress;
+        gapAheadStr = gapAheadLaps >= 1 ? '+' + Math.floor(gapAheadLaps) + ' kôl' : '+' + (gapAheadLaps*r.entry.pace).toFixed(1) + 's';
+      }
+    }
+    const posChange = r.entry.gridPos - (i+1);
+    const posChangeStr = posChange === 0 ? '=' : (posChange > 0 ? '▲' + posChange : '▼' + Math.abs(posChange));
+    const posChangeColor = posChange > 0 ? '#1a7a4c' : (posChange < 0 ? '#c23b3b' : 'var(--text-muted)');
+    return `<tr class="${i===0?'leader':''}">
+      <td class="pos">${i+1}</td>
+      <td><span class="swatch" style="background:${r.entry.color}"></span>${r.entry.car.auto}${r.finished?' 🏁':''}</td>
+      <td><span class="pneu-pill" style="background:${PNEU_COLORS[r.entry.car.pneu]||'#999'}"></span>${r.entry.car.pneu}</td>
+      <td class="mono">${lap}/${simState.laps}</td>
+      <td class="mono" style="color:${posChangeColor};font-weight:700;">${posChangeStr}</td>
+      <td class="gap">${gapAheadStr}</td>
+      <td class="gap">${gapLeaderStr}</td>
+    </tr>`;
+  }).join('');
+
+  document.getElementById('simClock').innerHTML = fmtTime(simState.elapsed) + `<div class="lap">Kolo ${Math.min(Math.floor(leader.progress)+1, simState.laps)} / ${simState.laps}</div>`;
+}
+
+function tick(ts){
+  if(simState.lastTs === null) simState.lastTs = ts;
+  const dtReal = (ts - simState.lastTs)/1000;
+  simState.lastTs = ts;
+  if(simState.running && !simState.finished){
+    advanceRace(dtReal * simState.speed);
+  }
+  simState.grid.forEach(entry => positionMarker(entry));
+  updateLiveTiming();
+
+  if(simState.grid.length > 0){
+    const allFinished = simState.grid.every(e => e.finishElapsed !== null);
+    if(simState.running && !simState.finished && allFinished){
+      simState.finished = true;
+      simState.running = false;
+      document.getElementById('simPlayBtn').textContent = '↻ Nová simulácia';
+      const flag = document.getElementById('finishFlag');
+      flag.classList.add('show');
+      setTimeout(()=>flag.classList.remove('show'), 2500);
+    }
+  }
+  if(simState.running){
+    simState.animHandle = requestAnimationFrame(tick);
+  } else {
+    simState.animHandle = null;
+  }
+}
+
+function resetSim(fullReset){
+  if(simState.animHandle) cancelAnimationFrame(simState.animHandle);
+  simState.running = false;
+  simState.finished = false;
+  simState.elapsed = 0;
+  simState.lastTs = null;
+  simState.animHandle = null;
+  document.getElementById('simPlayBtn').textContent = '▶ Štart';
+  document.getElementById('finishFlag').classList.remove('show');
+  buildGrid();
+  buildMarkers();
+  const hint = document.getElementById('simHint');
+  hint.style.display = simState.grid.length > 0 ? 'none' : 'flex';
+  simState.grid.forEach(entry => positionMarker(entry));
+  updateLiveTiming();
+}
+
+function startPauseSim(){
+  if(simState.grid.length < 2){ alert('Vyber aspoň 2 autá do pretekov.'); return; }
+  if(simState.finished){ resetSim(true); return; }
+  simState.running = !simState.running;
+  simState.lastTs = null;
+  document.getElementById('simPlayBtn').textContent = simState.running ? '⏸ Pauza' : '▶ Pokračovať';
+  if(simState.running && !simState.animHandle){ simState.animHandle = requestAnimationFrame(tick); }
+}
+
+function bindSimEvents(){
+  document.getElementById('simLaps').addEventListener('input', e=>{ simState.laps = Math.max(1, parseInt(e.target.value,10) || 10); });
+  document.getElementById('simGridOrder').addEventListener('change', e=>{
+    simState.gridOrder = e.target.value;
+    syncCustomOrder();
+    renderCustomOrderList();
+    if(!simState.running) resetSim(false);
+  });
+  document.getElementById('simSpeed').addEventListener('change', e=>{ simState.speed = parseFloat(e.target.value); });
+  document.getElementById('simPlayBtn').addEventListener('click', startPauseSim);
+  document.getElementById('simResetBtn').addEventListener('click', ()=>{
+    simState.selectedIds = new Set();
+    simState.customOrder = [];
+    simState.laps = 10;
+    simState.gridOrder = 'reverse';
+    simState.speed = 25;
+    document.getElementById('simLaps').value = 10;
+    document.getElementById('simGridOrder').value = 'reverse';
+    document.getElementById('simSpeed').value = 25;
+    renderRaceCarPicker(applyFilters());
+    renderCustomOrderList();
+    resetSim(true);
+  });
+  document.getElementById('useClusterBtn').addEventListener('click', ()=>{
+    if(!lastClusterIds) return;
+    simState.selectedIds = new Set(lastClusterIds);
+    renderRaceCarPicker(applyFilters());
+    syncCustomOrder();
+    renderCustomOrderList();
+    resetSim(false);
+  });
+  document.getElementById('clearSelBtn').addEventListener('click', ()=>{
+    simState.selectedIds = new Set();
+    renderRaceCarPicker(applyFilters());
+    syncCustomOrder();
+    renderCustomOrderList();
+    resetSim(false);
+  });
+}
+// ---------- /Live race simulation ----------
+
+function renderAll(){
+  const filtered = applyFilters();
+  renderTower(filtered);
+  renderTable(filtered);
+  renderChart(filtered);
+  renderRaceCarPicker(filtered);
+  document.getElementById('countBadge').textContent = filtered.length + ' / ' + cars.length + ' zobrazených';
+  const n = parseInt(document.getElementById('clusterN').value,10) || 20;
+  renderClusterResult(n, filtered);
+}
+
+function renderYearChips(){
+  const decades = new Set(cars.filter(c=>c.year!=null).map(c=>Math.floor(c.year/10)*10));
+  allYearDecades = decades;
+  filters.yearDecades = new Set([...filters.yearDecades].filter(d=>decades.has(d)));
+  const sortedDecades = [...decades].sort((a,b)=>a-b);
+  const el = document.getElementById('yearChips');
+  el.innerHTML = sortedDecades.map(d=>`<div class="chip chip-generic${filters.yearDecades.has(d)?' active':''}" data-decade="${d}">${d}s</div>`).join('');
+  el.querySelectorAll('.chip').forEach(chip=>{
+    chip.addEventListener('click', ()=>{
+      const d = parseInt(chip.dataset.decade, 10);
+      if(filters.yearDecades.has(d)){ filters.yearDecades.delete(d); chip.classList.remove('active'); }
+      else { filters.yearDecades.add(d); chip.classList.add('active'); }
+      renderAll();
+    });
+  });
+}
+
+function initPneuChips(){
+  const el = document.getElementById('pneuChips');
+  el.innerHTML = PNEU_ORDER.map(p=>`<div class="chip active" data-p="${p}"><span class="dot" style="background:${PNEU_COLORS[p]}"></span>${p}</div>`).join('');
+  el.querySelectorAll('.chip').forEach(chip=>{
+    chip.addEventListener('click', ()=>{
+      const p = chip.dataset.p;
+      if(filters.pneu.has(p)){ filters.pneu.delete(p); chip.classList.remove('active'); }
+      else { filters.pneu.add(p); chip.classList.add('active'); }
+      renderAll();
+    });
+  });
+}
+
+function bindEvents(){
+  document.getElementById('searchInput').addEventListener('input', e=>{ filters.search = e.target.value; renderAll(); });
+  document.getElementById('stockSelect').addEventListener('change', e=>{ filters.stock = e.target.value; renderAll(); });
+  document.getElementById('timeMin').addEventListener('input', e=>{ filters.timeMin = e.target.value===''?null:parseFloat(e.target.value); renderAll(); });
+  document.getElementById('timeMax').addEventListener('input', e=>{ filters.timeMax = e.target.value===''?null:parseFloat(e.target.value); renderAll(); });
+  document.getElementById('prMin').addEventListener('input', e=>{ filters.prMin = e.target.value===''?null:parseFloat(e.target.value); renderAll(); });
+  document.getElementById('prMax').addEventListener('input', e=>{ filters.prMax = e.target.value===''?null:parseFloat(e.target.value); renderAll(); });
+  document.getElementById('exactYearInput').addEventListener('input', e=>{ filters.exactYear = e.target.value===''?null:parseInt(e.target.value,10); renderAll(); });
+  document.getElementById('resetFiltersBtn').addEventListener('click', ()=>{
+    filters = { search:'', pneu:new Set(PNEU_ORDER), stock:'all', timeMin:null, timeMax:null, prMin:null, prMax:null, yearDecades:new Set(), exactYear:null };
+    document.getElementById('searchInput').value='';
+    document.getElementById('stockSelect').value='all';
+    document.getElementById('exactYearInput').value='';
+    ['timeMin','timeMax','prMin','prMax'].forEach(id=>document.getElementById(id).value='');
+    document.querySelectorAll('#pneuChips .chip').forEach(c=>c.classList.add('active'));
+    document.querySelectorAll('#yearChips .chip').forEach(c=>c.classList.remove('active'));
+    renderAll();
+  });
+
+  document.querySelectorAll('#carsTable thead th').forEach(th=>{
+    th.addEventListener('click', ()=>{
+      const col = th.dataset.col;
+      if(sortState.col===col) sortState.dir = sortState.dir==='asc'?'desc':'asc';
+      else { sortState.col = col; sortState.dir = 'asc'; }
+      renderAll();
+    });
+  });
+
+  document.querySelectorAll('.chart-toggle button[data-mode]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      document.querySelectorAll('.chart-toggle button[data-mode]').forEach(b=>b.classList.remove('active'));
+      btn.classList.add('active');
+      chartMode = btn.dataset.mode;
+      renderAll();
+    });
+  });
+  document.getElementById('resetZoomBtn').addEventListener('click', ()=>{ if(chart) chart.resetZoom(); });
+
+  document.getElementById('clusterBtn').addEventListener('click', ()=>{
+    const n = parseInt(document.getElementById('clusterN').value,10) || 20;
+    renderClusterResult(n, applyFilters());
+  });
+
+  bindAddLapEvents();
+}
+
+function openAddLapModal(){
+  document.getElementById('addLapErr').textContent = '';
+  document.getElementById('lapAuto').value = '';
+  document.getElementById('lapPr').value = '';
+  document.getElementById('lapTime').value = '';
+  document.querySelector('input[name="lapStock"][value="A"]').checked = true;
+  document.getElementById('addLapOverlay').style.display = 'flex';
+  document.getElementById('lapAuto').focus();
+}
+
+function closeAddLapModal(){
+  document.getElementById('addLapOverlay').style.display = 'none';
+}
+
+async function submitAddLap(){
+  const errEl = document.getElementById('addLapErr');
+  errEl.textContent = '';
+  const auto = document.getElementById('lapAuto').value.trim();
+  const pr = parseFloat(document.getElementById('lapPr').value);
+  const pneu = document.getElementById('lapPneu').value;
+  const sec = parseTimeCell(document.getElementById('lapTime').value.trim());
+  const stock = document.querySelector('input[name="lapStock"]:checked').value;
+
+  if(!auto){ errEl.textContent = 'Zadaj názov auta.'; return; }
+  if(isNaN(pr)){ errEl.textContent = 'Power Rating musí byť číslo.'; return; }
+  if(sec==null || isNaN(sec) || sec<=0){ errEl.textContent = 'Zadaj platný čas (napr. 2:40.914 alebo 160.914).'; return; }
+  if(!supabaseClient){ errEl.textContent = 'Supabase nie je nakonfigurované — vyplň SUPABASE_URL a SUPABASE_ANON_KEY v kóde.'; return; }
+
+  const saveBtn = document.getElementById('addLapSaveBtn');
+  saveBtn.disabled = true;
+  try{
+    await insertLap({ auto, pr, pneu, sec: Math.round(sec*1000)/1000, stock });
+    closeAddLapModal();
+    await loadData();
+    renderYearChips();
+    renderAll();
+    renderCustomOrderList();
+  }catch(err){
+    errEl.textContent = 'Chyba: ' + err.message;
+  }finally{
+    saveBtn.disabled = false;
+  }
+}
+
+function bindAddLapEvents(){
+  document.getElementById('lapPneu').innerHTML = PNEU_ORDER.map(p=>`<option value="${p}">${p}</option>`).join('');
+  document.getElementById('addLapBtn').addEventListener('click', openAddLapModal);
+  document.getElementById('addLapCancelBtn').addEventListener('click', closeAddLapModal);
+  document.getElementById('addLapOverlay').addEventListener('click', e=>{ if(e.target.id==='addLapOverlay') closeAddLapModal(); });
+  document.getElementById('addLapSaveBtn').addEventListener('click', submitAddLap);
+}
+
+(async function init(){
+  await loadData();
+  initPneuChips();
+  renderYearChips();
+  renderLegend();
+  bindEvents();
+  bindSimEvents();
+  renderAll();
+  renderCustomOrderList();
+  resetSim(true);
+})();
+</script>
+</body>
+</html>
