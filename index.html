@@ -236,13 +236,14 @@
         <table id="carsTable">
           <thead>
             <tr>
+              <th class="mono">#</th>
               <th data-col="auto">Auto <span class="arrow"></span></th>
               <th data-col="year" class="mono">Rok <span class="arrow"></span></th>
               <th data-col="sec" class="mono">Čas <span class="arrow"></span></th>
               <th data-col="pr" class="mono">PR <span class="arrow"></span></th>
               <th data-col="pneu">Pneu <span class="arrow"></span></th>
               <th data-col="stock">Stock <span class="arrow"></span></th>
-              <th>Akcie</th>
+              <th>Akcie <span class="arrow"></span></th>
             </tr>
           </thead>
           <tbody id="tableBody"></tbody>
@@ -535,9 +536,10 @@ function sortRows(rows){
 function renderTable(filtered){
   const tbody = document.getElementById('tableBody');
   const sorted = sortRows(filtered);
-  if(sorted.length===0){ tbody.innerHTML = '<tr><td colspan="7" class="empty">Žiadne auto nevyhovuje filtrom</td></tr>'; return; }
-  tbody.innerHTML = sorted.map(c => `
+  if(sorted.length===0){ tbody.innerHTML = '<tr><td colspan="8" class="empty">Žiadne auto nevyhovuje filtrom</td></tr>'; return; }
+  tbody.innerHTML = sorted.map((c,i) => `
     <tr>
+      <td class="mono">${i+1}.</td>
       <td>${c.auto}</td>
       <td class="mono">${c.year ?? '—'}</td>
       <td class="mono">${fmtTime(c.sec)}</td>
@@ -547,7 +549,7 @@ function renderTable(filtered){
       <td><button class="del-btn" data-id="${c.__id}">Zmazať</button></td>
     </tr>
   `).join('');
-  document.querySelectorAll('#carsTable thead th').forEach(th=>{
+  document.querySelectorAll('#carsTable thead th[data-col]').forEach(th=>{
     th.querySelector('.arrow').textContent = th.dataset.col===sortState.col ? (sortState.dir==='asc'?'▲':'▼') : '';
   });
 }
@@ -1201,7 +1203,7 @@ function bindEvents(){
     renderAll();
   });
 
-  document.querySelectorAll('#carsTable thead th').forEach(th=>{
+  document.querySelectorAll('#carsTable thead th[data-col]').forEach(th=>{
     th.addEventListener('click', ()=>{
       const col = th.dataset.col;
       if(sortState.col===col) sortState.dir = sortState.dir==='asc'?'desc':'asc';
