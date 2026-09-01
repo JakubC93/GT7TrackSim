@@ -78,8 +78,8 @@
   thead th .arrow{opacity:.4;font-size:10px;margin-left:3px;}
   tbody td{padding:7px 10px;border-bottom:1px solid var(--border);}
   tbody tr:hover{background:var(--accent-light);}
-  .del-btn{background:none;border:1px solid var(--border-strong);border-radius:6px;padding:3px 9px;font-size:11px;color:var(--text-muted);cursor:pointer;}
-  .del-btn:hover{background:#fbe4e4;color:#c23b3b;border-color:#c23b3b;}
+  .edit-btn{background:none;border:1px solid var(--border-strong);border-radius:6px;padding:3px 9px;font-size:11px;color:var(--text-muted);cursor:pointer;}
+  .edit-btn:hover{background:var(--accent-light);color:var(--accent-text);border-color:var(--accent);}
   td.mono, th.mono{font-family:var(--mono);}
   .table-scroll{max-height:520px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;}
   .pneu-pill{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;vertical-align:middle;}
@@ -152,6 +152,7 @@
   .sim-clock{position:absolute;top:12px;right:14px;background:rgba(28,28,26,0.85);color:#fff;font-family:var(--mono);font-size:13px;padding:8px 14px;border-radius:8px;text-align:right;line-height:1.4;}
   .sim-clock .lap{font-size:11px;color:#c9c8c2;}
   .sim-hint{position:absolute;top:12px;left:14px;background:rgba(255,255,255,0.9);border:1px solid var(--border-strong);font-size:12px;padding:6px 12px;border-radius:8px;color:var(--text-muted);}
+  .car-tooltip{position:absolute;pointer-events:none;background:rgba(28,28,26,0.92);color:#fff;font-size:12px;padding:6px 10px;border-radius:6px;white-space:nowrap;opacity:0;transition:opacity .1s;z-index:30;}
   .flag{position:absolute;bottom:12px;left:50%;transform:translateX(-50%);background:var(--accent);color:#fff;font-size:13px;font-weight:700;padding:6px 16px;border-radius:20px;opacity:0;transition:opacity .3s;pointer-events:none;}
   .flag.show{opacity:1;}
 
@@ -345,6 +346,7 @@
       <div class="sim-hint" id="simHint">Vyber autá nižšie a stlač Štart</div>
       <div class="sim-clock" id="simClock">00:00.0<div class="lap">Kolo — / —</div></div>
       <div class="flag" id="finishFlag">🏁 Cieľ!</div>
+      <div class="car-tooltip" id="carTooltip"></div>
     </div>
 
     <div style="display:flex; justify-content:center; margin-bottom:14px;">
@@ -363,7 +365,7 @@
 
   <div class="modal-overlay" id="addLapOverlay" style="display:none;">
     <div class="modal">
-      <h3>Pridať nový čas</h3>
+      <h3 id="lapModalTitle">Pridať nový čas</h3>
       <div class="err" id="addLapErr"></div>
       <div class="field">
         <label>Auto</label>
@@ -389,6 +391,7 @@
         </div>
       </div>
       <div class="modal-actions">
+        <button class="btn btn-ghost" id="lapDeleteBtn" style="display:none;color:#c23b3b;margin-right:auto;">Vymazať</button>
         <button class="btn btn-ghost" id="addLapCancelBtn">Zrušiť</button>
         <button class="btn btn-accent" id="addLapSaveBtn">Uložiť</button>
       </div>
@@ -408,6 +411,7 @@ const PNEU_COLORS = { ZM:'#e34948', ZS:'#eda100', SM:'#7a1f3d', ST:'#8a8a86', KM
 const PNEU_ORDER = ['ZM','ZS','SM','ST','KM','KS','KT'];
 
 let cars = [];
+let editingCarId = null;
 let filters = { search:'', pneu:new Set(PNEU_ORDER), stock:'all', timeMin:null, timeMax:null, prMin:null, prMax:null, yearDecades:new Set(), exactYear:null };
 let allYearDecades = new Set();
 let sortState = { col:'sec', dir:'asc' };
@@ -466,13 +470,20 @@ async function insertLap(lap){
   return data[0];
 }
 
+async function updateLap(id, lap){
+  const { data, error } = await supabaseClient.from('laps').update(lap).eq('id', id).select();
+  if(error) throw new Error(error.message);
+  if(!data || data.length===0) throw new Error('Zmena sa neuložila (skontroluj, či je v Supabase spustená "public update" politika).');
+  return data[0];
+}
+
 async function deleteCar(id){
   const car = cars.find(c=>c.__id===id);
-  if(!car) return;
-  if(!confirm('Naozaj natrvalo zmazať "' + car.auto + '" (' + fmtTime(car.sec) + ')?')) return;
-  if(!supabaseClient) return;
+  if(!car) return false;
+  if(!confirm('Naozaj natrvalo zmazať "' + car.auto + '" (' + fmtTime(car.sec) + ')?')) return false;
+  if(!supabaseClient) return false;
   const { error } = await supabaseClient.from('laps').delete().eq('id', id);
-  if(error){ alert('Chyba pri mazaní: ' + error.message); return; }
+  if(error){ alert('Chyba pri mazaní: ' + error.message); return false; }
   await loadData();
   simState.selectedIds.delete(id);
   syncCustomOrder();
@@ -481,6 +492,7 @@ async function deleteCar(id){
   renderAll();
   renderCustomOrderList();
   if(!simState.running) resetSim(false);
+  return true;
 }
 
 function applyFilters(){
@@ -546,7 +558,7 @@ function renderTable(filtered){
       <td class="mono">${c.pr.toFixed(1)}</td>
       <td><span class="pneu-pill" style="background:${PNEU_COLORS[c.pneu]||'#999'}"></span>${c.pneu}</td>
       <td><span class="stock-badge ${c.stock}">${c.stock==='N'?'upravené':'sériové'}</span></td>
-      <td><button class="del-btn" data-id="${c.__id}">Zmazať</button></td>
+      <td><button class="edit-btn" data-id="${c.__id}">Upraviť</button></td>
     </tr>
   `).join('');
   document.querySelectorAll('#carsTable thead th[data-col]').forEach(th=>{
@@ -940,20 +952,40 @@ function distanceForTimeFraction(t){
   return d0 + (d1-d0)*localT;
 }
 
+function showCarTooltip(e, entry){
+  const tt = document.getElementById('carTooltip');
+  const wrap = document.querySelector('.track-wrap');
+  const wrapRect = wrap.getBoundingClientRect();
+  tt.textContent = entry.car.auto + ' — ' + fmtTime(entry.car.sec) + ' (tempo ' + fmtTime(entry.pace) + ')';
+  tt.style.opacity = '1';
+  let x = e.clientX - wrapRect.left + 14;
+  let y = e.clientY - wrapRect.top + 14;
+  const ttW = tt.offsetWidth, ttH = tt.offsetHeight;
+  if(x + ttW > wrapRect.width) x = e.clientX - wrapRect.left - ttW - 14;
+  if(y + ttH > wrapRect.height) y = e.clientY - wrapRect.top - ttH - 14;
+  tt.style.left = x + 'px';
+  tt.style.top = y + 'px';
+}
+
+function hideCarTooltip(){
+  document.getElementById('carTooltip').style.opacity = '0';
+}
+
 function buildMarkers(){
   const g = document.getElementById('carMarkers');
   g.innerHTML = '';
   simState.grid.forEach(entry => {
     const wrap = document.createElementNS('http://www.w3.org/2000/svg','g');
+    wrap.style.cursor = 'pointer';
     const tri = document.createElementNS('http://www.w3.org/2000/svg','path');
     tri.setAttribute('d','M -7,-5 L 9,0 L -7,5 Z');
     tri.setAttribute('fill', entry.color);
     tri.setAttribute('stroke','#fff');
     tri.setAttribute('stroke-width','1.2');
-    const title = document.createElementNS('http://www.w3.org/2000/svg','title');
-    title.textContent = entry.car.auto + ' — reálny čas ' + fmtTime(entry.car.sec) + ', priemerné tempo v simulácii ' + fmtTime(entry.pace);
     wrap.appendChild(tri);
-    wrap.appendChild(title);
+    wrap.addEventListener('mouseenter', e => showCarTooltip(e, entry));
+    wrap.addEventListener('mousemove', e => showCarTooltip(e, entry));
+    wrap.addEventListener('mouseleave', hideCarTooltip);
     g.appendChild(wrap);
     entry.markerEl = wrap;
   });
@@ -1181,9 +1213,9 @@ function initPneuChips(){
 
 function bindEvents(){
   document.getElementById('tableBody').addEventListener('click', e=>{
-    const btn = e.target.closest('.del-btn');
+    const btn = e.target.closest('.edit-btn');
     if(!btn) return;
-    deleteCar(parseInt(btn.dataset.id, 10));
+    openLapModal(parseInt(btn.dataset.id, 10));
   });
   document.getElementById('searchInput').addEventListener('input', e=>{ filters.search = e.target.value; renderAll(); });
   document.getElementById('stockSelect').addEventListener('change', e=>{ filters.stock = e.target.value; renderAll(); });
@@ -1230,18 +1262,24 @@ function bindEvents(){
   bindAddLapEvents();
 }
 
-function openAddLapModal(){
+function openLapModal(id){
+  editingCarId = id;
+  const car = id!=null ? cars.find(c=>c.__id===id) : null;
   document.getElementById('addLapErr').textContent = '';
-  document.getElementById('lapAuto').value = '';
-  document.getElementById('lapPr').value = '';
-  document.getElementById('lapTime').value = '';
-  document.querySelector('input[name="lapStock"][value="A"]').checked = true;
+  document.getElementById('lapModalTitle').textContent = car ? 'Upraviť čas' : 'Pridať nový čas';
+  document.getElementById('lapAuto').value = car ? car.auto : '';
+  document.getElementById('lapPr').value = car ? car.pr : '';
+  document.getElementById('lapPneu').value = car ? car.pneu : 'ZM';
+  document.getElementById('lapTime').value = car ? fmtTime(car.sec) : '';
+  document.querySelector('input[name="lapStock"][value="' + (car ? car.stock : 'A') + '"]').checked = true;
+  document.getElementById('lapDeleteBtn').style.display = car ? 'inline-block' : 'none';
   document.getElementById('addLapOverlay').style.display = 'flex';
   document.getElementById('lapAuto').focus();
 }
 
 function closeAddLapModal(){
   document.getElementById('addLapOverlay').style.display = 'none';
+  editingCarId = null;
 }
 
 async function submitAddLap(){
@@ -1261,7 +1299,9 @@ async function submitAddLap(){
   const saveBtn = document.getElementById('addLapSaveBtn');
   saveBtn.disabled = true;
   try{
-    await insertLap({ auto, pr, pneu, sec: Math.round(sec*1000)/1000, stock });
+    const lap = { auto, pr, pneu, sec: Math.round(sec*1000)/1000, stock };
+    if(editingCarId!=null) await updateLap(editingCarId, lap);
+    else await insertLap(lap);
     closeAddLapModal();
     await loadData();
     renderYearChips();
@@ -1276,10 +1316,15 @@ async function submitAddLap(){
 
 function bindAddLapEvents(){
   document.getElementById('lapPneu').innerHTML = PNEU_ORDER.map(p=>`<option value="${p}">${p}</option>`).join('');
-  document.getElementById('addLapBtn').addEventListener('click', openAddLapModal);
+  document.getElementById('addLapBtn').addEventListener('click', ()=>openLapModal(null));
   document.getElementById('addLapCancelBtn').addEventListener('click', closeAddLapModal);
   document.getElementById('addLapOverlay').addEventListener('click', e=>{ if(e.target.id==='addLapOverlay') closeAddLapModal(); });
   document.getElementById('addLapSaveBtn').addEventListener('click', submitAddLap);
+  document.getElementById('lapDeleteBtn').addEventListener('click', async ()=>{
+    if(editingCarId==null) return;
+    const ok = await deleteCar(editingCarId);
+    if(ok) closeAddLapModal();
+  });
 }
 
 (async function init(){
