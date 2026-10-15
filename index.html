@@ -17,7 +17,7 @@
     --warn:#c77d22; --warn-light:#f6e9d8;
     --mono: ui-monospace, "SF Mono", "Cascadia Mono", Consolas, "Liberation Mono", Menlo, monospace;
     --sans: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-    --p-zm:#e34948; --p-zs:#eda100; --p-sm:#7a1f3d; --p-ss:#b5563f; --p-st:#8a8a86;
+    --p-zm:#e34948; --p-zs:#eda100; --p-zt:#3d7fc4; --p-sm:#7a1f3d; --p-ss:#b5563f; --p-st:#8a8a86;
     --p-km:#e87ba4; --p-ks:#1f7a3d; --p-kt:#4a3aa7;
   }
   *{box-sizing:border-box;}
@@ -58,7 +58,7 @@
   .chip{display:flex;align-items:center;gap:6px;font-size:12px;font-weight:600;padding:6px 10px;border-radius:20px;border:1.5px solid var(--border-strong);cursor:pointer;user-select:none;background:var(--surface);color:var(--text-muted);}
   .chip .dot{width:9px;height:9px;border-radius:50%;}
   .chip.active{color:#fff;border-color:transparent;}
-  .chip.active[data-p=ZM]{background:var(--p-zm);} .chip.active[data-p=ZS]{background:var(--p-zs);}
+  .chip.active[data-p=ZM]{background:var(--p-zm);} .chip.active[data-p=ZS]{background:var(--p-zs);} .chip.active[data-p=ZT]{background:var(--p-zt);}
   .chip.active[data-p=SM]{background:var(--p-sm);} .chip.active[data-p=SS]{background:var(--p-ss);} .chip.active[data-p=ST]{background:var(--p-st);}
   .chip.active[data-p=KM]{background:var(--p-km);} .chip.active[data-p=KS]{background:var(--p-ks);}
   .chip.active[data-p=KT]{background:var(--p-kt);}
@@ -407,8 +407,8 @@ const SUPABASE_URL = 'https://kgltibejkeaaucxccdki.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_6VpHXoHzA9ZInIWwoUVkEQ_DTLa1h0M';
 const supabaseClient = (SUPABASE_URL.includes('YOUR-PROJECT')) ? null : window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-const PNEU_COLORS = { ZM:'#e34948', ZS:'#eda100', SM:'#7a1f3d', SS:'#b5563f', ST:'#8a8a86', KM:'#e87ba4', KS:'#1f7a3d', KT:'#4a3aa7' };
-const PNEU_ORDER = ['ZM','ZS','SM','SS','ST','KM','KS','KT'];
+const PNEU_COLORS = { ZM:'#e34948', ZS:'#eda100', ZT:'#3d7fc4', SM:'#7a1f3d', SS:'#b5563f', ST:'#8a8a86', KM:'#e87ba4', KS:'#1f7a3d', KT:'#4a3aa7' };
+const PNEU_ORDER = ['ZM','ZS','ZT','SM','SS','ST','KM','KS','KT'];
 
 let cars = [];
 let editingCarId = null;
@@ -757,7 +757,7 @@ function computeRacePace(selectedCars){
   const tStd = Math.sqrt(times.reduce((a,b)=>a+(b-tMean)**2,0)/n);
   const prMean = prs.reduce((a,b)=>a+b,0)/n;
   const prStd = Math.sqrt(prs.reduce((a,b)=>a+(b-prMean)**2,0)/n);
-  const TIRE_ADJ = { ZM:0.05, ZS:0.05, SM:0, SS:0, ST:0, KM:-0.05, KS:-0.08, KT:-0.12 };
+  const TIRE_ADJ = { ZM:0.05, ZS:0.05, ZT:0.03, SM:0, SS:0, ST:0, KM:-0.05, KS:-0.08, KT:-0.12 };
   selectedCars.forEach(c => {
     if(tStd < 0.01 || prStd < 0.01){ paceMap.set(c.__id, c.sec); return; }
     const tZ = -(c.sec - tMean)/tStd;
