@@ -81,6 +81,15 @@
   .edit-btn{background:none;border:1px solid var(--border-strong);border-radius:6px;padding:3px 9px;font-size:11px;color:var(--text-muted);cursor:pointer;}
   .edit-btn:hover{background:var(--accent-light);color:var(--accent-text);border-color:var(--accent);}
   td.mono, th.mono{font-family:var(--mono);}
+  .race-order-head{display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:12px;}
+  .race-order-head h2{margin:0;}
+  .race-order-status{font-size:12px;color:var(--text-muted);}
+  .race-order-status.err{color:#c23b3b;}
+  #raceOrderTable thead th{cursor:default;}
+  #raceOrderTable tbody tr{cursor:grab;user-select:none;-webkit-user-select:none;}
+  #raceOrderTable tbody tr.dragging{background:var(--accent-light);outline:2px solid var(--accent);outline-offset:-2px;cursor:grabbing;position:relative;z-index:1;}
+  .drag-handle{width:28px;color:var(--text-faint);font-size:16px;line-height:1;text-align:center;touch-action:none;}
+  #raceOrderTable tbody tr:hover .drag-handle{color:var(--text);}
   .table-scroll{max-height:520px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;}
   .pneu-pill{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;vertical-align:middle;}
   .stock-badge{font-size:10px;padding:1px 6px;border-radius:10px;font-weight:700;}
@@ -244,7 +253,6 @@
               <th data-col="pr" class="mono">PR <span class="arrow"></span></th>
               <th data-col="pneu">Pneu <span class="arrow"></span></th>
               <th data-col="stock">Stock <span class="arrow"></span></th>
-              <th data-col="races" class="mono">Závod <span class="arrow"></span></th>
               <th>Akcie <span class="arrow"></span></th>
             </tr>
           </thead>
@@ -262,6 +270,27 @@
       </div>
       <div class="legend-row" id="legendRow"></div>
       <div class="chart-wrap"><canvas id="mainChart"></canvas></div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="race-order-head">
+      <h2>Poradie v preteku</h2>
+      <span class="race-order-status" id="raceOrderStatus">Chyť auto a potiahni ho na nové miesto</span>
+    </div>
+    <div class="table-scroll" id="raceOrderScroll">
+      <table id="raceOrderTable">
+        <thead>
+          <tr>
+            <th></th>
+            <th class="mono">Poradie</th>
+            <th>Auto</th>
+            <th>Pneu</th>
+            <th class="mono">PR</th>
+          </tr>
+        </thead>
+        <tbody id="raceOrderBody"></tbody>
+      </table>
     </div>
   </div>
 
@@ -385,10 +414,6 @@
         <input type="text" id="lapTime" placeholder="napr. 2:40.914 alebo 160.914">
       </div>
       <div class="field">
-        <label>Počet závodov</label>
-        <input type="number" id="lapRaces" min="0" step="1" placeholder="0">
-      </div>
-      <div class="field">
         <label>Stock / upravené</label>
         <div class="radio-row">
           <label><input type="radio" name="lapStock" value="A" checked> Sériové</label>
@@ -438,7 +463,7 @@ function parseYearFromName(name){
 }
 
 function normalizeCars(arr){
-  return arr.map(c => ({...c, sec:Number(c.sec), pr:Number(c.pr), year: parseYearFromName(c.auto), races: Number(c.races ?? 0), __id: c.id}));
+  return arr.map(c => ({...c, sec:Number(c.sec), pr:Number(c.pr), year: parseYearFromName(c.auto), race_position: c.race_position ?? null, __id: c.id}));
 }
 
 async function loadData(){
@@ -553,7 +578,7 @@ function sortRows(rows){
 function renderTable(filtered){
   const tbody = document.getElementById('tableBody');
   const sorted = sortRows(filtered);
-  if(sorted.length===0){ tbody.innerHTML = '<tr><td colspan="9" class="empty">Žiadne auto nevyhovuje filtrom</td></tr>'; return; }
+  if(sorted.length===0){ tbody.innerHTML = '<tr><td colspan="8" class="empty">Žiadne auto nevyhovuje filtrom</td></tr>'; return; }
   tbody.innerHTML = sorted.map((c,i) => `
     <tr>
       <td class="mono">${i+1}.</td>
@@ -563,7 +588,6 @@ function renderTable(filtered){
       <td class="mono">${c.pr.toFixed(1)}</td>
       <td><span class="pneu-pill" style="background:${PNEU_COLORS[c.pneu]||'#999'}"></span>${c.pneu}</td>
       <td><span class="stock-badge ${c.stock}">${c.stock==='N'?'upravené':'sériové'}</span></td>
-      <td class="mono">${c.races}</td>
       <td><button class="edit-btn" data-id="${c.__id}">Upraviť</button></td>
     </tr>
   `).join('');
@@ -1176,7 +1200,123 @@ function bindSimEvents(){
 }
 // ---------- /Live race simulation ----------
 
+// ===== Poradie v preteku (drag & drop, ukladá sa do stĺpca race_position) =====
+let raceOrderDragging = false;
+let raceOrderSaveChain = Promise.resolve();
+
+function raceOrderedCars(){
+  // Autá s uloženou pozíciou idú podľa nej, nové autá (bez pozície) sa pridajú na koniec podľa času.
+  return [...cars].sort((a,b)=>{
+    const ap = a.race_position ?? Infinity, bp = b.race_position ?? Infinity;
+    if(ap!==bp) return ap-bp;
+    return a.sec-b.sec;
+  });
+}
+
+function renderRaceOrder(){
+  if(raceOrderDragging) return;
+  const tbody = document.getElementById('raceOrderBody');
+  const ordered = raceOrderedCars();
+  if(ordered.length===0){ tbody.innerHTML = '<tr><td colspan="5" class="empty">Zatiaľ žiadne autá</td></tr>'; return; }
+  tbody.innerHTML = ordered.map((c,i)=>`
+    <tr data-id="${c.__id}">
+      <td class="drag-handle" title="Potiahni">⠿</td>
+      <td class="mono pos-cell">${i+1}.</td>
+      <td>${c.auto}</td>
+      <td><span class="pneu-pill" style="background:${PNEU_COLORS[c.pneu]||'#999'}"></span>${c.pneu}</td>
+      <td class="mono">${c.pr.toFixed(1)}</td>
+    </tr>
+  `).join('');
+}
+
+function setRaceOrderStatus(text, isErr){
+  const el = document.getElementById('raceOrderStatus');
+  el.textContent = text;
+  el.classList.toggle('err', !!isErr);
+}
+
+function saveRaceOrder(ids){
+  const changes = [];
+  ids.forEach((id,i)=>{
+    const car = cars.find(c=>c.__id===id);
+    if(car && car.race_position!==i+1){ car.race_position = i+1; changes.push({id, pos:i+1}); }
+  });
+  if(changes.length===0) return;
+  if(!supabaseClient){ setRaceOrderStatus('Supabase nie je nakonfigurované — poradie sa neuložilo.', true); return; }
+  setRaceOrderStatus('Ukladám poradie…');
+  raceOrderSaveChain = raceOrderSaveChain.then(async ()=>{
+    for(let i=0; i<changes.length; i+=20){
+      const chunk = changes.slice(i, i+20);
+      const results = await Promise.all(chunk.map(ch=>supabaseClient.from('laps').update({ race_position: ch.pos }).eq('id', ch.id)));
+      const failed = results.find(r=>r.error);
+      if(failed) throw new Error(failed.error.message);
+    }
+    setRaceOrderStatus('Poradie uložené · ' + new Date().toLocaleTimeString('sk-SK'));
+  }).catch(err=>{
+    setRaceOrderStatus('Poradie sa nepodarilo uložiť: ' + err.message, true);
+  });
+}
+
+function bindRaceOrderDrag(){
+  const tbody = document.getElementById('raceOrderBody');
+  const scroller = document.getElementById('raceOrderScroll');
+  let dragRow = null, startOrder = '', lastY = 0, rafId = null;
+
+  function moveRowTo(y){
+    const rows = [...tbody.querySelectorAll('tr[data-id]')].filter(r=>r!==dragRow);
+    const before = rows.find(r=>{ const b = r.getBoundingClientRect(); return y < b.top + b.height/2; });
+    if(before){ if(dragRow.nextElementSibling!==before) tbody.insertBefore(dragRow, before); }
+    else if(tbody.lastElementChild!==dragRow) tbody.appendChild(dragRow);
+    tbody.querySelectorAll('tr[data-id] .pos-cell').forEach((td,i)=>{ td.textContent = (i+1) + '.'; });
+  }
+
+  function autoScroll(){
+    if(!dragRow) return;
+    const b = scroller.getBoundingClientRect();
+    const edge = 40;
+    let dy = 0;
+    if(lastY < b.top + edge) dy = -Math.ceil((b.top + edge - lastY)/4);
+    else if(lastY > b.bottom - edge) dy = Math.ceil((lastY - (b.bottom - edge))/4);
+    if(dy){ scroller.scrollTop += dy; moveRowTo(lastY); }
+    rafId = requestAnimationFrame(autoScroll);
+  }
+
+  tbody.addEventListener('pointerdown', e=>{
+    const row = e.target.closest('tr[data-id]');
+    if(!row || e.button!==0) return;
+    // Na dotykovom displeji sa ťahá len za úchyt ⠿, aby sa dal zoznam normálne posúvať prstom.
+    if(e.pointerType!=='mouse' && !e.target.closest('.drag-handle')) return;
+    e.preventDefault();
+    dragRow = row;
+    raceOrderDragging = true;
+    startOrder = [...tbody.querySelectorAll('tr[data-id]')].map(r=>r.dataset.id).join(',');
+    lastY = e.clientY;
+    row.classList.add('dragging');
+    tbody.setPointerCapture(e.pointerId);
+    rafId = requestAnimationFrame(autoScroll);
+  });
+
+  tbody.addEventListener('pointermove', e=>{
+    if(!dragRow) return;
+    lastY = e.clientY;
+    moveRowTo(lastY);
+  });
+
+  function endDrag(){
+    if(!dragRow) return;
+    dragRow.classList.remove('dragging');
+    dragRow = null;
+    raceOrderDragging = false;
+    cancelAnimationFrame(rafId);
+    const ids = [...tbody.querySelectorAll('tr[data-id]')].map(r=>r.dataset.id);
+    if(ids.join(',')!==startOrder) saveRaceOrder(ids.map(Number));
+  }
+  tbody.addEventListener('pointerup', endDrag);
+  tbody.addEventListener('pointercancel', endDrag);
+}
+
 function renderAll(){
+  renderRaceOrder();
   const filtered = applyFilters();
   renderTower(filtered);
   renderTable(filtered);
@@ -1266,6 +1406,7 @@ function bindEvents(){
   });
 
   bindAddLapEvents();
+  bindRaceOrderDrag();
 }
 
 function openLapModal(id){
@@ -1277,7 +1418,6 @@ function openLapModal(id){
   document.getElementById('lapPr').value = car ? car.pr : '';
   document.getElementById('lapPneu').value = car ? car.pneu : 'ZM';
   document.getElementById('lapTime').value = car ? fmtTime(car.sec) : '';
-  document.getElementById('lapRaces').value = car ? car.races : 0;
   document.querySelector('input[name="lapStock"][value="' + (car ? car.stock : 'A') + '"]').checked = true;
   document.getElementById('lapDeleteBtn').style.display = car ? 'inline-block' : 'none';
   document.getElementById('addLapOverlay').style.display = 'flex';
@@ -1297,19 +1437,16 @@ async function submitAddLap(){
   const pneu = document.getElementById('lapPneu').value;
   const sec = parseTimeCell(document.getElementById('lapTime').value.trim());
   const stock = document.querySelector('input[name="lapStock"]:checked').value;
-  const racesRaw = document.getElementById('lapRaces').value.trim();
-  const races = racesRaw==='' ? 0 : Number(racesRaw);
 
   if(!auto){ errEl.textContent = 'Zadaj názov auta.'; return; }
   if(isNaN(pr)){ errEl.textContent = 'Power Rating musí byť číslo.'; return; }
   if(sec==null || isNaN(sec) || sec<=0){ errEl.textContent = 'Zadaj platný čas (napr. 2:40.914 alebo 160.914).'; return; }
-  if(!Number.isInteger(races) || races<0){ errEl.textContent = 'Počet závodov musí byť celé číslo 0 alebo viac.'; return; }
   if(!supabaseClient){ errEl.textContent = 'Supabase nie je nakonfigurované — vyplň SUPABASE_URL a SUPABASE_ANON_KEY v kóde.'; return; }
 
   const saveBtn = document.getElementById('addLapSaveBtn');
   saveBtn.disabled = true;
   try{
-    const lap = { auto, pr, pneu, sec: Math.round(sec*1000)/1000, stock, races };
+    const lap = { auto, pr, pneu, sec: Math.round(sec*1000)/1000, stock };
     if(editingCarId!=null) await updateLap(editingCarId, lap);
     else await insertLap(lap);
     closeAddLapModal();
