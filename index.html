@@ -244,6 +244,7 @@
               <th data-col="pr" class="mono">PR <span class="arrow"></span></th>
               <th data-col="pneu">Pneu <span class="arrow"></span></th>
               <th data-col="stock">Stock <span class="arrow"></span></th>
+              <th data-col="races" class="mono">Závod <span class="arrow"></span></th>
               <th>Akcie <span class="arrow"></span></th>
             </tr>
           </thead>
@@ -384,6 +385,10 @@
         <input type="text" id="lapTime" placeholder="napr. 2:40.914 alebo 160.914">
       </div>
       <div class="field">
+        <label>Počet závodov</label>
+        <input type="number" id="lapRaces" min="0" step="1" placeholder="0">
+      </div>
+      <div class="field">
         <label>Stock / upravené</label>
         <div class="radio-row">
           <label><input type="radio" name="lapStock" value="A" checked> Sériové</label>
@@ -433,7 +438,7 @@ function parseYearFromName(name){
 }
 
 function normalizeCars(arr){
-  return arr.map(c => ({...c, sec:Number(c.sec), pr:Number(c.pr), year: parseYearFromName(c.auto), __id: c.id}));
+  return arr.map(c => ({...c, sec:Number(c.sec), pr:Number(c.pr), year: parseYearFromName(c.auto), races: Number(c.races ?? 0), __id: c.id}));
 }
 
 async function loadData(){
@@ -548,7 +553,7 @@ function sortRows(rows){
 function renderTable(filtered){
   const tbody = document.getElementById('tableBody');
   const sorted = sortRows(filtered);
-  if(sorted.length===0){ tbody.innerHTML = '<tr><td colspan="8" class="empty">Žiadne auto nevyhovuje filtrom</td></tr>'; return; }
+  if(sorted.length===0){ tbody.innerHTML = '<tr><td colspan="9" class="empty">Žiadne auto nevyhovuje filtrom</td></tr>'; return; }
   tbody.innerHTML = sorted.map((c,i) => `
     <tr>
       <td class="mono">${i+1}.</td>
@@ -558,6 +563,7 @@ function renderTable(filtered){
       <td class="mono">${c.pr.toFixed(1)}</td>
       <td><span class="pneu-pill" style="background:${PNEU_COLORS[c.pneu]||'#999'}"></span>${c.pneu}</td>
       <td><span class="stock-badge ${c.stock}">${c.stock==='N'?'upravené':'sériové'}</span></td>
+      <td class="mono">${c.races}</td>
       <td><button class="edit-btn" data-id="${c.__id}">Upraviť</button></td>
     </tr>
   `).join('');
@@ -1271,6 +1277,7 @@ function openLapModal(id){
   document.getElementById('lapPr').value = car ? car.pr : '';
   document.getElementById('lapPneu').value = car ? car.pneu : 'ZM';
   document.getElementById('lapTime').value = car ? fmtTime(car.sec) : '';
+  document.getElementById('lapRaces').value = car ? car.races : 0;
   document.querySelector('input[name="lapStock"][value="' + (car ? car.stock : 'A') + '"]').checked = true;
   document.getElementById('lapDeleteBtn').style.display = car ? 'inline-block' : 'none';
   document.getElementById('addLapOverlay').style.display = 'flex';
@@ -1290,16 +1297,19 @@ async function submitAddLap(){
   const pneu = document.getElementById('lapPneu').value;
   const sec = parseTimeCell(document.getElementById('lapTime').value.trim());
   const stock = document.querySelector('input[name="lapStock"]:checked').value;
+  const racesRaw = document.getElementById('lapRaces').value.trim();
+  const races = racesRaw==='' ? 0 : Number(racesRaw);
 
   if(!auto){ errEl.textContent = 'Zadaj názov auta.'; return; }
   if(isNaN(pr)){ errEl.textContent = 'Power Rating musí byť číslo.'; return; }
   if(sec==null || isNaN(sec) || sec<=0){ errEl.textContent = 'Zadaj platný čas (napr. 2:40.914 alebo 160.914).'; return; }
+  if(!Number.isInteger(races) || races<0){ errEl.textContent = 'Počet závodov musí byť celé číslo 0 alebo viac.'; return; }
   if(!supabaseClient){ errEl.textContent = 'Supabase nie je nakonfigurované — vyplň SUPABASE_URL a SUPABASE_ANON_KEY v kóde.'; return; }
 
   const saveBtn = document.getElementById('addLapSaveBtn');
   saveBtn.disabled = true;
   try{
-    const lap = { auto, pr, pneu, sec: Math.round(sec*1000)/1000, stock };
+    const lap = { auto, pr, pneu, sec: Math.round(sec*1000)/1000, stock, races };
     if(editingCarId!=null) await updateLap(editingCarId, lap);
     else await insertLap(lap);
     closeAddLapModal();
