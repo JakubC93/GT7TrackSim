@@ -88,6 +88,10 @@
   #raceOrderTable thead th{cursor:default;}
   #raceOrderTable tbody tr{cursor:grab;user-select:none;-webkit-user-select:none;}
   #raceOrderTable tbody tr.dragging{background:var(--accent-light);outline:2px solid var(--accent);outline-offset:-2px;cursor:grabbing;position:relative;z-index:1;}
+  .rank-diff{font-family:var(--mono);white-space:nowrap;}
+  .rank-diff.up{color:var(--accent);font-weight:600;}
+  .rank-diff.down{color:#c23b3b;font-weight:600;}
+  .rank-diff.same{color:var(--text-faint);}
   .drag-handle{width:28px;color:var(--text-faint);font-size:16px;line-height:1;text-align:center;touch-action:none;}
   #raceOrderTable tbody tr:hover .drag-handle{color:var(--text);}
   .table-scroll{max-height:520px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;}
@@ -288,6 +292,7 @@
             <th>Pneu</th>
             <th class="mono">PR</th>
             <th>Stock</th>
+            <th class="mono" title="Rozdiel oproti poradiu podľa zajazdeného času. ▲ = v preteku vyššie ako podľa času, ▼ = nižšie.">± vs čas</th>
           </tr>
         </thead>
         <tbody id="raceOrderBody"></tbody>
@@ -1218,17 +1223,34 @@ function renderRaceOrder(){
   if(raceOrderDragging) return;
   const tbody = document.getElementById('raceOrderBody');
   const ordered = raceOrderedCars();
-  if(ordered.length===0){ tbody.innerHTML = '<tr><td colspan="6" class="empty">Zatiaľ žiadne autá</td></tr>'; return; }
+  if(ordered.length===0){ tbody.innerHTML = '<tr><td colspan="7" class="empty">Zatiaľ žiadne autá</td></tr>'; return; }
+  // Poradie podľa času (rovnako ako Zoznam áut zoradený podľa času, najrýchlejší = 1.)
+  const timeRank = new Map([...cars].sort((a,b)=>a.sec-b.sec || a.__id-b.__id).map((c,i)=>[c.__id, i+1]));
   tbody.innerHTML = ordered.map((c,i)=>`
-    <tr data-id="${c.__id}">
+    <tr data-id="${c.__id}" data-trank="${timeRank.get(c.__id)}">
       <td class="drag-handle" title="Potiahni">⠿</td>
       <td class="mono pos-cell">${i+1}.</td>
       <td>${c.auto}</td>
       <td><span class="pneu-pill" style="background:${PNEU_COLORS[c.pneu]||'#999'}"></span>${c.pneu}</td>
       <td class="mono">${c.pr.toFixed(1)}</td>
       <td><span class="stock-badge ${c.stock}">${c.stock==='N'?'upravené':'sériové'}</span></td>
+      <td class="rank-diff"></td>
     </tr>
   `).join('');
+  updateRaceOrderNumbers();
+}
+
+function updateRaceOrderNumbers(){
+  document.querySelectorAll('#raceOrderBody tr[data-id]').forEach((tr,i)=>{
+    const pos = i+1;
+    const trank = Number(tr.dataset.trank);
+    const diff = trank - pos;
+    tr.querySelector('.pos-cell').textContent = pos + '.';
+    const td = tr.querySelector('.rank-diff');
+    td.className = 'rank-diff ' + (diff>0 ? 'up' : diff<0 ? 'down' : 'same');
+    td.textContent = diff>0 ? '▲ ' + diff : diff<0 ? '▼ ' + (-diff) : '—';
+    td.title = 'Podľa času: ' + trank + '.';
+  });
 }
 
 function setRaceOrderStatus(text, isErr){
@@ -1269,7 +1291,7 @@ function bindRaceOrderDrag(){
     const before = rows.find(r=>{ const b = r.getBoundingClientRect(); return y < b.top + b.height/2; });
     if(before){ if(dragRow.nextElementSibling!==before) tbody.insertBefore(dragRow, before); }
     else if(tbody.lastElementChild!==dragRow) tbody.appendChild(dragRow);
-    tbody.querySelectorAll('tr[data-id] .pos-cell').forEach((td,i)=>{ td.textContent = (i+1) + '.'; });
+    updateRaceOrderNumbers();
   }
 
   function autoScroll(){
