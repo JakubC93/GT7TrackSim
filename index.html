@@ -287,6 +287,7 @@
             <th>Auto</th>
             <th>Pneu</th>
             <th class="mono">PR</th>
+            <th>Stock</th>
           </tr>
         </thead>
         <tbody id="raceOrderBody"></tbody>
@@ -1217,7 +1218,7 @@ function renderRaceOrder(){
   if(raceOrderDragging) return;
   const tbody = document.getElementById('raceOrderBody');
   const ordered = raceOrderedCars();
-  if(ordered.length===0){ tbody.innerHTML = '<tr><td colspan="5" class="empty">Zatiaľ žiadne autá</td></tr>'; return; }
+  if(ordered.length===0){ tbody.innerHTML = '<tr><td colspan="6" class="empty">Zatiaľ žiadne autá</td></tr>'; return; }
   tbody.innerHTML = ordered.map((c,i)=>`
     <tr data-id="${c.__id}">
       <td class="drag-handle" title="Potiahni">⠿</td>
@@ -1225,6 +1226,7 @@ function renderRaceOrder(){
       <td>${c.auto}</td>
       <td><span class="pneu-pill" style="background:${PNEU_COLORS[c.pneu]||'#999'}"></span>${c.pneu}</td>
       <td class="mono">${c.pr.toFixed(1)}</td>
+      <td><span class="stock-badge ${c.stock}">${c.stock==='N'?'upravené':'sériové'}</span></td>
     </tr>
   `).join('');
 }
