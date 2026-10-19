@@ -331,6 +331,15 @@
         </select>
       </div>
       <div class="field">
+        <label title="Ako veľmi poradie áut v tabuľke Poradie v preteku ovplyvňuje ich tempo v simulácii">Vplyv Poradia v preteku</label>
+        <select id="simRankWeight">
+          <option value="0">Žiadny</option>
+          <option value="0.25">Mierny (25&nbsp;%)</option>
+          <option value="0.5" selected>Stredný (50&nbsp;%)</option>
+          <option value="0.75">Silný (75&nbsp;%)</option>
+        </select>
+      </div>
+      <div class="field">
         <label>Rýchlosť simulácie</label>
         <select id="simSpeed">
           <option value="5">5×</option>
@@ -344,7 +353,7 @@
         <button class="btn btn-ghost" id="simResetBtn">Reset</button>
       </div>
     </div>
-    <div id="paceModelNote" style="font-size:11.5px;color:var(--text-muted);margin:-6px 0 12px;">Tempo áut vychádza z modelu: 60&nbsp;% čas + 40&nbsp;% PR, upravené podľa pneumatiky, AWD/turbo a veku auta, s miernou náhodnou odchýlkou na každom kole. Autá sa navyše navzájom blokujú — keď je auto tesne za iným (do ~1 s), nemôže ho okamžite predbehnúť, aj keby malo výrazne rýchlejšie tempo; musí sa cez neho postupne "prepracovať". Štartová pozícia sa riadi tvojím reálnym zajazdeným časom. Pri menej než 4 vybraných autách sa použije čistý zajazdený čas.</div>
+    <div id="paceModelNote" style="font-size:11.5px;color:var(--text-muted);margin:-6px 0 12px;">Tempo áut vychádza z modelu: zajazdený čas (60&nbsp;%) a PR (40&nbsp;%), skombinované s umiestnením v tabuľke Poradie v preteku podľa zvoleného vplyvu (pri strednom vplyve 30&nbsp;% čas + 20&nbsp;% PR + 50&nbsp;% poradie), upravené podľa pneumatiky, AWD/turbo a veku auta, s miernou náhodnou odchýlkou na každom kole. Autá sa navyše navzájom blokujú — keď je auto tesne za iným (do ~1 s), nemôže ho okamžite predbehnúť, aj keby malo výrazne rýchlejšie tempo; musí sa cez neho postupne "prepracovať". Štartová pozícia sa riadi voľbou Štartové poradie. Pri menej než 4 vybraných autách sa použije čistý zajazdený čas.</div>
 
     <div class="race-picker-header">
       <label>Vyber autá do pretekov (<span id="simSelCount">0</span> vybraných, z aktuálne filtrovanej sady)</label>
@@ -693,7 +702,8 @@ const simState = {
   grid: [],
   trackLen: 0,
   animHandle: null,
-  paceModelActive: false
+  paceModelActive: false,
+  rankWeight: 0.5
 };
 
 function carColor(i, total){
@@ -793,12 +803,18 @@ function computeRacePace(selectedCars){
   const tStd = Math.sqrt(times.reduce((a,b)=>a+(b-tMean)**2,0)/n);
   const prMean = prs.reduce((a,b)=>a+b,0)/n;
   const prStd = Math.sqrt(prs.reduce((a,b)=>a+(b-prMean)**2,0)/n);
+  // Umiestnenie vybraných áut v tabuľke Poradie v preteku (1 = najvyššie), prevedené na z-skóre v rámci poľa.
+  const raceRank = new Map(raceOrderedCars().filter(c=>selectedCars.includes(c)).map((c,i)=>[c.__id, i+1]));
+  const rankMean = (n+1)/2;
+  const rankStd = Math.sqrt((n*n-1)/12);
+  const w = simState.rankWeight;
   const TIRE_ADJ = { ZM:0.05, ZS:0.05, ZT:0.03, SM:0, SS:0, ST:0, KM:-0.05, KS:-0.08, KT:-0.12 };
   selectedCars.forEach(c => {
     if(tStd < 0.01 || prStd < 0.01){ paceMap.set(c.__id, c.sec); return; }
     const tZ = -(c.sec - tMean)/tStd;
     const prZ = (c.pr - prMean)/prStd;
-    let composite = 0.6*tZ + 0.4*prZ;
+    const rankZ = -(raceRank.get(c.__id) - rankMean)/rankStd;
+    let composite = (1-w)*(0.6*tZ + 0.4*prZ) + w*rankZ;
     composite += TIRE_ADJ[c.pneu] ?? 0;
     const traits = detectCarTraits(c.auto);
     if(traits.awd) composite += 0.10;
@@ -1173,6 +1189,10 @@ function bindSimEvents(){
     renderCustomOrderList();
     if(!simState.running) resetSim(false);
   });
+  document.getElementById('simRankWeight').addEventListener('change', e=>{
+    simState.rankWeight = parseFloat(e.target.value);
+    if(!simState.running) resetSim(false);
+  });
   document.getElementById('simSpeed').addEventListener('change', e=>{ simState.speed = parseFloat(e.target.value); });
   document.getElementById('simPlayBtn').addEventListener('click', startPauseSim);
   document.getElementById('simResetBtn').addEventListener('click', ()=>{
@@ -1181,6 +1201,8 @@ function bindSimEvents(){
     simState.laps = 10;
     simState.gridOrder = 'reverse';
     simState.speed = 25;
+    simState.rankWeight = 0.5;
+    document.getElementById('simRankWeight').value = '0.5';
     document.getElementById('simLaps').value = 10;
     document.getElementById('simGridOrder').value = 'reverse';
     document.getElementById('simSpeed').value = 25;
@@ -1333,7 +1355,11 @@ function bindRaceOrderDrag(){
     raceOrderDragging = false;
     cancelAnimationFrame(rafId);
     const ids = [...tbody.querySelectorAll('tr[data-id]')].map(r=>r.dataset.id);
-    if(ids.join(',')!==startOrder) saveRaceOrder(ids.map(Number));
+    if(ids.join(',')!==startOrder){
+      saveRaceOrder(ids.map(Number));
+      // Nové poradie mení tempo áut — prepočítaj pripravenú (nespustenú) simuláciu.
+      if(!simState.running && !simState.finished && simState.elapsed===0) resetSim(false);
+    }
   }
   tbody.addEventListener('pointerup', endDrag);
   tbody.addEventListener('pointercancel', endDrag);
