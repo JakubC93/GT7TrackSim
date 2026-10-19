@@ -688,6 +688,7 @@ function renderClusterResult(n, filtered){
 
 // ---------- Live race simulation ----------
 const SLOT_GAP_SECONDS = 0.2;
+const SIM_MAX_STEP = 0.25; // s simulovaného času na jeden krok výpočtu
 
 const simState = {
   laps: 10,
@@ -918,10 +919,13 @@ function advanceRace(dtSim){
   // 4. apply movement + capture finish moments
   order.forEach(car => {
     if(car.finishElapsed !== null) return;
+    const before = car.actualProgress;
     car.actualProgress += car.constrainedDelta;
     if(car.actualProgress >= simState.laps){
+      // presný okamih prejazdu cieľom v rámci kroku, nie koniec kroku — inak autá prejdené v jednom kroku dostanú rovnaký čas
+      const frac = car.constrainedDelta > 0 ? (simState.laps - before)/car.constrainedDelta : 1;
       car.actualProgress = simState.laps;
-      car.finishElapsed = simState.elapsed;
+      car.finishElapsed = simState.elapsed - dtSim + frac*dtSim;
     }
   });
 }
@@ -1129,10 +1133,17 @@ function updateLiveTiming(){
 
 function tick(ts){
   if(simState.lastTs === null) simState.lastTs = ts;
-  const dtReal = (ts - simState.lastTs)/1000;
+  // max. 0,1 s reálneho času na snímok — po návrate z inej karty simulácia pokračuje, neskočí naraz dopredu
+  const dtReal = Math.min((ts - simState.lastTs)/1000, 0.1);
   simState.lastTs = ts;
   if(simState.running && !simState.finished){
-    advanceRace(dtReal * simState.speed);
+    // pri vysokej rýchlosti rozdeľ snímok na malé kroky, aby blokovanie a predbiehanie fungovali rovnako ako pri 5×
+    let remaining = dtReal * simState.speed;
+    while(remaining > 1e-9){
+      const step = Math.min(remaining, SIM_MAX_STEP);
+      advanceRace(step);
+      remaining -= step;
+    }
   }
   simState.grid.forEach(entry => positionMarker(entry));
   updateLiveTiming();
